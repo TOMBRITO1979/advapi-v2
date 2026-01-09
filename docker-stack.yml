@@ -39,7 +39,7 @@ services:
 
   # API Backend
   api:
-    image: janeiro/advapi:api-latest
+    image: tomautomations/advapi:api-latest
     environment:
       DATABASE_URL: postgresql://advapi:${POSTGRES_PASSWORD}@postgres:5432/advapi
       REDIS_URL: redis://redis:6379
@@ -65,7 +65,7 @@ services:
 
   # Worker de Scraping
   worker:
-    image: janeiro/advapi:worker-latest
+    image: tomautomations/advapi:worker-latest
     command: ["node", "dist/workers/scraper.worker.js"]
     environment:
       DATABASE_URL: postgresql://advapi:${POSTGRES_PASSWORD}@postgres:5432/advapi
@@ -84,7 +84,7 @@ services:
 
   # Frontend Dashboard
   frontend:
-    image: janeiro/advapi:frontend-latest
+    image: tomautomations/advapi:frontend-latest
     networks:
       - advapi_internal
       - network_public
