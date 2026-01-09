@@ -1,0 +1,240 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// ADVOGADOS MONITORADOS
+// ============================================================================
+
+model Advogado {
+  id                String   @id @default(uuid())
+
+  // Dados para busca
+  nome              String
+  oab               String?
+  ufOab             String?
+
+  // Vinculo com AdvWell
+  advwellCompanyId  String   // ID da empresa no AdvWell
+  advwellClientId   String?  // ID do cliente no AdvWell (para vincular processos)
+
+  // Configuracoes
+  ativo             Boolean  @default(true)
+  tribunais         String[] // TJRJ, TJSP, etc. Vazio = todos
+
+  // Callback
+  callbackUrl       String?  // URL para notificar AdvWell
+
+  // Stats
+  ultimaConsulta    DateTime?
+  totalPublicacoes  Int      @default(0)
+
+  // Metadados
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  // Relacoes
+  publicacoes       Publicacao[]
+  consultas         Consulta[]
+
+  @@index([advwellCompanyId])
+  @@index([ativo])
+  @@index([nome])
+}
+
+// ============================================================================
+// PUBLICACOES ENCONTRADAS
+// ============================================================================
+
+model Publicacao {
+  id                  String    @id @default(uuid())
+
+  // Vinculo
+  advogadoId          String
+  advogado            Advogado  @relation(fields: [advogadoId], references: [id], onDelete: Cascade)
+
+  // Dados da publicacao
+  numeroProcesso      String
+  siglaTribunal       String?
+  orgaoJulgador       String?
+  dataDisponibilizacao DateTime?
+  dataPublicacao      DateTime?
+  tipoComunicacao     String?
+  textoComunicacao    String?   @db.Text
+  linkIntegra         String?
+
+  // Hash para evitar duplicatas
+  hashConteudo        String?
+
+  // Status
+  status              PublicacaoStatus @default(NOVA)
+  enviadoAdvwell      Boolean   @default(false)
+  enviadoEm           DateTime?
+
+  // Metadados
+  fonte               String    @default("HCOMUNICA_CNJ")
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  @@unique([advogadoId, numeroProcesso, dataPublicacao, hashConteudo])
+  @@index([advogadoId])
+  @@index([status])
+  @@index([dataPublicacao])
+  @@index([enviadoAdvwell])
+}
+
+enum PublicacaoStatus {
+  NOVA
+  PROCESSANDO
+  ENVIADA
+  ERRO
+  IGNORADA
+}
+
+// ============================================================================
+// FILA DE CONSULTAS
+// ============================================================================
+
+model Consulta {
+  id              String         @id @default(uuid())
+
+  // Vinculo
+  advogadoId      String
+  advogado        Advogado       @relation(fields: [advogadoId], references: [id], onDelete: Cascade)
+
+  // Parametros da consulta
+  dataInicio      DateTime
+  dataFim         DateTime
+  tribunal        String?
+
+  // Status da fila
+  status          ConsultaStatus @default(PENDENTE)
+  prioridade      Int            @default(0)
+  tentativas      Int            @default(0)
+  maxTentativas   Int            @default(3)
+
+  // Resultado
+  publicacoesEncontradas Int?
+  erro            String?
+
+  // Proxy usado
+  proxyId         String?
+  proxy           Proxy?         @relation(fields: [proxyId], references: [id])
+
+  // Timestamps
+  agendadoPara    DateTime       @default(now())
+  iniciadoEm      DateTime?
+  finalizadoEm    DateTime?
+  createdAt       DateTime       @default(now())
+
+  @@index([status])
+  @@index([agendadoPara])
+  @@index([advogadoId])
+}
+
+enum ConsultaStatus {
+  PENDENTE
+  PROCESSANDO
+  CONCLUIDA
+  ERRO
+  CANCELADA
+}
+
+// ============================================================================
+// PROXIES
+// ============================================================================
+
+model Proxy {
+  id              String       @id @default(uuid())
+
+  // Dados do proxy
+  host            String
+  porta           Int
+  usuario         String?
+  senha           String?
+  protocolo       String       @default("http") // http, https, socks5
+
+  // Status
+  ativo           Boolean      @default(true)
+  funcionando     Boolean      @default(true)
+
+  // Metricas
+  totalConsultas  Int          @default(0)
+  consultasSucesso Int         @default(0)
+  consultasFalha  Int          @default(0)
+  ultimoUso       DateTime?
+  ultimoErro      String?
+
+  // Rate limiting
+  consultasPorHora Int         @default(60)
+  consultasHoraAtual Int       @default(0)
+  horaAtualInicio DateTime?
+
+  // Metadados
+  nome            String?      // Nome amigavel
+  provedor        String?      // Webshare, BrightData, etc
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  // Relacoes
+  consultas       Consulta[]
+
+  @@unique([host, porta])
+  @@index([ativo, funcionando])
+}
+
+// ============================================================================
+// LOGS E METRICAS
+// ============================================================================
+
+model ExecucaoLog {
+  id              String   @id @default(uuid())
+
+  tipo            String   // VARREDURA, CONSULTA, ENVIO, ERRO
+  descricao       String
+  detalhes        Json?
+
+  // Metricas
+  advogadosProcessados Int?
+  publicacoesEncontradas Int?
+  publicacoesNovas Int?
+  erros           Int?
+  duracaoMs       Int?
+
+  createdAt       DateTime @default(now())
+
+  @@index([tipo])
+  @@index([createdAt])
+}
+
+// ============================================================================
+// CONFIGURACOES
+// ============================================================================
+
+model Configuracao {
+  id              String   @id @default(uuid())
+  chave           String   @unique
+  valor           String
+  descricao       String?
+  updatedAt       DateTime @updatedAt
+}
+
+// ============================================================================
+// USUARIOS DO DASHBOARD
+// ============================================================================
+
+model Usuario {
+  id              String   @id @default(uuid())
+  email           String   @unique
+  senha           String
+  nome            String
+  ativo           Boolean  @default(true)
+  role            String   @default("user") // admin, user
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}

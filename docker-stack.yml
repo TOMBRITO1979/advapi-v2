@@ -1,0 +1,110 @@
+version: "3.8"
+
+# Docker Swarm Stack for ADVAPI v2
+# Before deploying, set these environment variables or use Docker secrets:
+# - POSTGRES_PASSWORD
+# - JWT_SECRET
+# - API_KEY
+# - ADVWELL_API_KEY
+
+services:
+  # PostgreSQL
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: advapi
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: advapi
+    volumes:
+      - advapi_postgres_data:/var/lib/postgresql/data
+    networks:
+      - advapi_internal
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+
+  # Redis
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - advapi_redis_data:/data
+    networks:
+      - advapi_internal
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+
+  # API Backend
+  api:
+    image: janeiro/advapi:api-latest
+    environment:
+      DATABASE_URL: postgresql://advapi:${POSTGRES_PASSWORD}@postgres:5432/advapi
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      JWT_EXPIRES_IN: 7d
+      API_KEY: ${API_KEY:-advapi-key}
+      ADVWELL_API_KEY: ${ADVWELL_API_KEY:-advwell-key}
+      NODE_ENV: production
+      PORT: 3000
+    networks:
+      - advapi_internal
+      - network_public
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+      labels:
+        - "traefik.enable=true"
+        - "traefik.http.routers.advapi-api.rule=Host(`api.advtom.com`)"
+        - "traefik.http.routers.advapi-api.entrypoints=websecure"
+        - "traefik.http.routers.advapi-api.tls.certresolver=letsencryptresolver"
+        - "traefik.http.services.advapi-api.loadbalancer.server.port=3000"
+
+  # Worker de Scraping
+  worker:
+    image: janeiro/advapi:worker-latest
+    command: ["node", "dist/workers/scraper.worker.js"]
+    environment:
+      DATABASE_URL: postgresql://advapi:${POSTGRES_PASSWORD}@postgres:5432/advapi
+      REDIS_URL: redis://redis:6379
+      ADVWELL_API_KEY: ${ADVWELL_API_KEY:-advwell-key}
+      NODE_ENV: production
+    networks:
+      - advapi_internal
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+      resources:
+        limits:
+          memory: 2G
+
+  # Frontend Dashboard
+  frontend:
+    image: janeiro/advapi:frontend-latest
+    networks:
+      - advapi_internal
+      - network_public
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+      labels:
+        - "traefik.enable=true"
+        - "traefik.http.routers.advapi-frontend.rule=Host(`app.advtom.com`)"
+        - "traefik.http.routers.advapi-frontend.entrypoints=websecure"
+        - "traefik.http.routers.advapi-frontend.tls.certresolver=letsencryptresolver"
+        - "traefik.http.services.advapi-frontend.loadbalancer.server.port=80"
+
+volumes:
+  advapi_postgres_data:
+  advapi_redis_data:
+
+networks:
+  advapi_internal:
+    driver: overlay
+  network_public:
+    external: true
