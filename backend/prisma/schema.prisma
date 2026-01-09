@@ -34,6 +34,11 @@ model Advogado {
   ultimaConsulta    DateTime?
   totalPublicacoes  Int      @default(0)
 
+  // Buffer/Cache - Sincronizacao automatica
+  ultimaSincronizacao DateTime?  // Quando foi feita a ultima busca automatica
+  totalAndamentos     Int      @default(0)  // Total de andamentos no banco
+  sincronizacaoAtiva  Boolean  @default(true)  // Se deve sincronizar automaticamente
+
   // Metadados
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
@@ -45,6 +50,7 @@ model Advogado {
   @@index([advwellCompanyId])
   @@index([ativo])
   @@index([nome])
+  @@index([sincronizacaoAtiva])
 }
 
 // ============================================================================
@@ -66,7 +72,14 @@ model Publicacao {
   dataPublicacao      DateTime?
   tipoComunicacao     String?
   textoComunicacao    String?   @db.Text
+  textoLimpo          String?   @db.Text  // Texto sem HTML/tags
   linkIntegra         String?
+
+  // Dados extraidos do texto da publicacao
+  parteAutor          String?   @db.Text  // AUTOR: Nome(s)
+  parteReu            String?   @db.Text  // REU: Nome(s)
+  comarca             String?             // Comarca da Capital, Regional de Bangu, etc
+  classeProcessual    String?             // PROCEDIMENTO COMUM CIVEL, EXECUCAO FISCAL, etc
 
   // Hash para evitar duplicatas
   hashConteudo        String?
@@ -213,6 +226,43 @@ model ExecucaoLog {
 }
 
 // ============================================================================
+// ALERTAS E ERROS DO SISTEMA
+// ============================================================================
+
+model LogSistema {
+  id              String   @id @default(uuid())
+
+  tipo            LogTipo  @default(ERRO)
+  categoria       String   // PROXY, SCRAPER, CALLBACK, SISTEMA
+  titulo          String
+  mensagem        String   @db.Text
+
+  // Contexto
+  proxyId         String?
+  advogadoId      String?
+  consultaId      String?
+
+  // Status
+  lido            Boolean  @default(false)
+  resolvido       Boolean  @default(false)
+  resolvidoEm     DateTime?
+
+  createdAt       DateTime @default(now())
+
+  @@index([tipo])
+  @@index([categoria])
+  @@index([lido])
+  @@index([createdAt])
+}
+
+enum LogTipo {
+  INFO
+  ALERTA
+  ERRO
+  CRITICO
+}
+
+// ============================================================================
 // CONFIGURACOES
 // ============================================================================
 
@@ -237,4 +287,39 @@ model Usuario {
   role            String   @default("user") // admin, user
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
+
+  // Relacoes
+  apiKeys         ApiKey[]
+}
+
+// ============================================================================
+// API KEYS PARA INTEGRACAO
+// ============================================================================
+
+model ApiKey {
+  id              String   @id @default(uuid())
+
+  // Dados da key
+  nome            String              // Nome descritivo da key
+  key             String   @unique    // SHA256 hash da key (64 chars hex)
+  prefixo         String              // Primeiros 8 chars para identificacao
+
+  // Vinculo com usuario que criou
+  usuarioId       String
+  usuario         Usuario  @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+
+  // Status
+  ativa           Boolean  @default(true)
+
+  // Metricas de uso
+  totalRequisicoes Int     @default(0)
+  ultimoUso       DateTime?
+
+  // Metadados
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([key])
+  @@index([ativa])
+  @@index([usuarioId])
 }

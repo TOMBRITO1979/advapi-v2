@@ -79,6 +79,11 @@ const worker = new Worker<ConsultaJob>(
                 : null,
               tipoComunicacao: processo.tipoComunicacao,
               textoComunicacao: processo.textoComunicacao,
+              textoLimpo: processo.textoLimpo,
+              parteAutor: processo.parteAutor,
+              parteReu: processo.parteReu,
+              comarca: processo.comarca,
+              classeProcessual: processo.classeProcessual,
               status: 'NOVA',
             },
           });
@@ -90,12 +95,19 @@ const worker = new Worker<ConsultaJob>(
 
       console.log(`[Worker] ${novas} novas publicacoes salvas`);
 
+      // Conta total de andamentos no banco para este advogado
+      const totalAndamentos = await prisma.publicacao.count({
+        where: { advogadoId },
+      });
+
       // Atualiza contador do advogado
       await prisma.advogado.update({
         where: { id: advogadoId },
         data: {
           totalPublicacoes: { increment: novas },
           ultimaConsulta: new Date(),
+          ultimaSincronizacao: new Date(),
+          totalAndamentos,
         },
       });
 
@@ -122,6 +134,11 @@ const worker = new Worker<ConsultaJob>(
             dataPublicacao: p.dataPublicacao,
             tipoComunicacao: p.tipoComunicacao,
             textoComunicacao: p.textoComunicacao,
+            textoLimpo: p.textoLimpo,
+            parteAutor: p.parteAutor,
+            parteReu: p.parteReu,
+            comarca: p.comarca,
+            classeProcessual: p.classeProcessual,
           }))
         );
       }
@@ -168,34 +185,112 @@ worker.on('error', (error) => {
   console.error(`[Worker] Erro: ${error.message}`);
 });
 
-// Scheduler para consultas automaticas
-async function agendarConsultasAutomaticas(): Promise<void> {
-  console.log('\n[Scheduler] Verificando advogados para consulta automatica...');
+// Configuracao de horario de funcionamento
+const HORARIO_CONFIG = {
+  horaInicio: 7,   // 7h da manha
+  horaFim: 21,     // 21h (9pm)
+  diasSemana: [1, 2, 3, 4, 5, 6], // Segunda(1) a Sabado(6) - Domingo(0) nao roda
+  fusoHorario: 'America/Sao_Paulo',
+};
 
-  // Busca advogados ativos que nao foram consultados nas ultimas 24h
-  const umDiaAtras = new Date();
-  umDiaAtras.setDate(umDiaAtras.getDate() - 1);
+// Delay variavel entre consultas (30s a 2min)
+const DELAY_MIN_MS = 30 * 1000;  // 30 segundos
+const DELAY_MAX_MS = 120 * 1000; // 2 minutos
+
+/**
+ * Verifica se esta dentro do horario de funcionamento
+ * Segunda a Sabado, das 7h as 21h (horario de Brasilia)
+ */
+function dentroDoHorarioFuncionamento(): boolean {
+  const agora = new Date();
+
+  // Converte para horario de Brasilia
+  const horaBrasilia = new Date(agora.toLocaleString('en-US', { timeZone: HORARIO_CONFIG.fusoHorario }));
+  const hora = horaBrasilia.getHours();
+  const diaSemana = horaBrasilia.getDay(); // 0=Domingo, 1=Segunda, ..., 6=Sabado
+
+  const dentroDoHorario = hora >= HORARIO_CONFIG.horaInicio && hora < HORARIO_CONFIG.horaFim;
+  const diaPermitido = HORARIO_CONFIG.diasSemana.includes(diaSemana);
+
+  return dentroDoHorario && diaPermitido;
+}
+
+/**
+ * Retorna delay aleatorio entre consultas
+ */
+function getDelayAleatorio(): number {
+  return DELAY_MIN_MS + Math.random() * (DELAY_MAX_MS - DELAY_MIN_MS);
+}
+
+/**
+ * Aguarda um tempo (promise)
+ */
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// Scheduler para consultas automaticas (MODO BUFFER/CACHE)
+async function agendarConsultasAutomaticas(): Promise<void> {
+  // Verifica se esta dentro do horario de funcionamento
+  if (!dentroDoHorarioFuncionamento()) {
+    const agora = new Date();
+    const horaBrasilia = new Date(agora.toLocaleString('en-US', { timeZone: HORARIO_CONFIG.fusoHorario }));
+    console.log(`\n[Scheduler] Fora do horario de funcionamento (${horaBrasilia.toLocaleString('pt-BR')})`);
+    console.log(`[Scheduler] Horario permitido: ${HORARIO_CONFIG.horaInicio}h-${HORARIO_CONFIG.horaFim}h, Segunda a Sabado`);
+    return;
+  }
+
+  console.log('\n[Scheduler] Verificando advogados para sincronizacao automatica...');
+  console.log(`[Scheduler] Horario de funcionamento: ${HORARIO_CONFIG.horaInicio}h-${HORARIO_CONFIG.horaFim}h, Seg-Sab`);
+
+  // Busca advogados com sincronizacao ativa que nao foram sincronizados nas ultimas 24h
+  const vinteQuatroHorasAtras = new Date();
+  vinteQuatroHorasAtras.setHours(vinteQuatroHorasAtras.getHours() - 24);
 
   const advogados = await prisma.advogado.findMany({
     where: {
       ativo: true,
+      sincronizacaoAtiva: true,
       OR: [
-        { ultimaConsulta: null },
-        { ultimaConsulta: { lt: umDiaAtras } },
+        { ultimaSincronizacao: null },
+        { ultimaSincronizacao: { lt: vinteQuatroHorasAtras } },
       ],
     },
+    orderBy: [
+      { ultimaSincronizacao: 'asc' }, // Prioriza quem nao sincronizou ha mais tempo
+    ],
+    take: 50, // Limita a 50 por ciclo para nao sobrecarregar
   });
 
-  console.log(`[Scheduler] ${advogados.length} advogados para consultar`);
+  console.log(`[Scheduler] ${advogados.length} advogados para sincronizar`);
 
   const { adicionarConsulta } = await import('../utils/queue.js');
 
-  for (const advogado of advogados) {
+  for (let i = 0; i < advogados.length; i++) {
+    const advogado = advogados[i];
+
+    // Verifica novamente se ainda esta no horario (pode ter passado durante o loop)
+    if (!dentroDoHorarioFuncionamento()) {
+      console.log(`[Scheduler] Saiu do horario de funcionamento, pausando...`);
+      break;
+    }
+
     const hoje = new Date();
-    const inicio = new Date(hoje.getFullYear() - 1, hoje.getMonth(), hoje.getDate())
-      .toISOString()
-      .split('T')[0];
     const fim = hoje.toISOString().split('T')[0];
+
+    // Define periodo baseado se ja foi sincronizado antes
+    let inicio: string;
+    if (advogado.ultimaSincronizacao) {
+      // Ja foi sincronizado: busca desde ultima sincronizacao (com margem de 1 dia)
+      const dataInicio = new Date(advogado.ultimaSincronizacao);
+      dataInicio.setDate(dataInicio.getDate() - 1);
+      inicio = dataInicio.toISOString().split('T')[0];
+    } else {
+      // Primeira sincronizacao: busca ultimos 12 meses
+      inicio = new Date(hoje.getFullYear() - 1, hoje.getMonth(), hoje.getDate())
+        .toISOString()
+        .split('T')[0];
+    }
 
     // Cria consulta
     await prisma.consulta.create({
@@ -217,15 +312,29 @@ async function agendarConsultasAutomaticas(): Promise<void> {
       prioridade: 0, // Baixa prioridade para automaticas
     });
 
-    console.log(`[Scheduler] Agendado: ${advogado.nome}`);
+    console.log(`[Scheduler] Sincronizando: ${advogado.nome} | Periodo: ${inicio} a ${fim}`);
+
+    // Delay variavel entre consultas (exceto na ultima)
+    if (i < advogados.length - 1) {
+      const delay = getDelayAleatorio();
+      console.log(`[Scheduler] Aguardando ${Math.round(delay / 1000)}s antes da proxima consulta...`);
+      await sleep(delay);
+    }
   }
+
+  // Log de status
+  const stats = await prisma.advogado.aggregate({
+    where: { ativo: true, sincronizacaoAtiva: true },
+    _count: true,
+  });
+  console.log(`[Scheduler] Total advogados ativos com sync: ${stats._count}`);
 }
 
-// Executa scheduler a cada hora
-setInterval(agendarConsultasAutomaticas, 60 * 60 * 1000);
+// Executa scheduler a cada 30 minutos (MODO BUFFER)
+setInterval(agendarConsultasAutomaticas, 30 * 60 * 1000);
 
-// Executa uma vez ao iniciar
-setTimeout(agendarConsultasAutomaticas, 5000);
+// Executa uma vez ao iniciar (depois de 10 segundos)
+setTimeout(agendarConsultasAutomaticas, 10000);
 
 // Graceful shutdown
 process.on('SIGTERM', async () => {

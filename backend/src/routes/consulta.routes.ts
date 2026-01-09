@@ -38,6 +38,9 @@ router.post('/', async (req, res) => {
     },
   });
 
+  // Flag para saber se é advogado novo
+  const isNovoAdvogado = !advogado;
+
   if (!advogado) {
     advogado = await prisma.advogado.create({
       data: {
@@ -63,10 +66,37 @@ router.post('/', async (req, res) => {
     });
   }
 
-  // Define periodo de busca
+  // Define periodo de busca baseado se é novo ou existente
   const hoje = new Date();
-  const inicio = dataInicio || new Date(hoje.getFullYear() - 1, hoje.getMonth(), hoje.getDate()).toISOString().split('T')[0];
   const fim = dataFim || hoje.toISOString().split('T')[0];
+
+  let inicio: string;
+  let tipoBusca: string;
+
+  if (dataInicio) {
+    // Se passou data especifica, usa ela
+    inicio = dataInicio;
+    tipoBusca = 'PERSONALIZADA';
+  } else if (isNovoAdvogado) {
+    // NOVO ADVOGADO: busca ultimos 12 meses (historico completo)
+    inicio = new Date(hoje.getFullYear() - 1, hoje.getMonth(), hoje.getDate()).toISOString().split('T')[0];
+    tipoBusca = 'HISTORICO_COMPLETO';
+  } else if (advogado.ultimaConsulta) {
+    // ADVOGADO EXISTENTE: busca desde ultima consulta
+    const ultimaConsulta = new Date(advogado.ultimaConsulta);
+    // Adiciona 1 dia de margem para garantir que nao perca nada
+    ultimaConsulta.setDate(ultimaConsulta.getDate() - 1);
+    inicio = ultimaConsulta.toISOString().split('T')[0];
+    tipoBusca = 'ATUALIZACAO';
+  } else {
+    // Fallback: ultimos 7 dias
+    const seteDiasAtras = new Date(hoje);
+    seteDiasAtras.setDate(hoje.getDate() - 7);
+    inicio = seteDiasAtras.toISOString().split('T')[0];
+    tipoBusca = 'ATUALIZACAO_7D';
+  }
+
+  console.log(`[Consulta] Advogado: ${advogado.nome} | Tipo: ${tipoBusca} | Periodo: ${inicio} a ${fim}`);
 
   // Cria consulta no banco
   const consulta = await prisma.consulta.create({
@@ -135,6 +165,128 @@ router.get('/:id/status', async (req, res) => {
 router.get('/fila/status', async (req, res) => {
   const status = await getQueueStatus();
   res.json(status);
+});
+
+/**
+ * GET /api/consulta/buffer/:advogadoNome
+ * Consulta DIRETA no banco (modo buffer/cache)
+ * Retorna dados ja salvos instantaneamente, sem fila
+ */
+router.get('/buffer', async (req, res) => {
+  const { companyId, advogadoNome, limite = '50' } = req.query;
+
+  if (!companyId || !advogadoNome) {
+    throw new AppError('companyId e advogadoNome sao obrigatorios', 400);
+  }
+
+  // Busca advogado
+  const advogado = await prisma.advogado.findFirst({
+    where: {
+      advwellCompanyId: String(companyId),
+      nome: String(advogadoNome).toUpperCase(),
+    },
+  });
+
+  if (!advogado) {
+    // Advogado nao existe ainda - retorna vazio mas sugere cadastrar
+    return res.json({
+      encontrado: false,
+      message: 'Advogado nao cadastrado. Use POST /api/consulta para cadastrar e iniciar monitoramento.',
+      publicacoes: [],
+    });
+  }
+
+  // Busca publicacoes do banco (ultimas N)
+  const publicacoes = await prisma.publicacao.findMany({
+    where: { advogadoId: advogado.id },
+    orderBy: { dataPublicacao: 'desc' },
+    take: Number(limite),
+    select: {
+      id: true,
+      numeroProcesso: true,
+      siglaTribunal: true,
+      dataPublicacao: true,
+      tipoComunicacao: true,
+      textoComunicacao: true,
+      textoLimpo: true,
+      parteAutor: true,
+      parteReu: true,
+      comarca: true,
+      classeProcessual: true,
+      status: true,
+      createdAt: true,
+    },
+  });
+
+  res.json({
+    encontrado: true,
+    advogado: {
+      id: advogado.id,
+      nome: advogado.nome,
+      oab: advogado.oab,
+      totalAndamentos: advogado.totalAndamentos,
+      ultimaSincronizacao: advogado.ultimaSincronizacao,
+      sincronizacaoAtiva: advogado.sincronizacaoAtiva,
+    },
+    totalPublicacoes: publicacoes.length,
+    publicacoes,
+  });
+});
+
+/**
+ * GET /api/consulta/buffer/processo/:numeroProcesso
+ * Consulta publicacoes de um processo especifico (ultimos 3 andamentos)
+ */
+router.get('/buffer/processo/:numeroProcesso', async (req, res) => {
+  const { numeroProcesso } = req.params;
+  const { companyId } = req.query;
+
+  // Busca publicacoes do processo
+  const publicacoes = await prisma.publicacao.findMany({
+    where: {
+      numeroProcesso,
+      ...(companyId && {
+        advogado: { advwellCompanyId: String(companyId) },
+      }),
+    },
+    orderBy: { dataPublicacao: 'desc' },
+    take: 3, // Ultimos 3 andamentos
+    select: {
+      id: true,
+      dataPublicacao: true,
+      tipoComunicacao: true,
+      textoComunicacao: true,
+      textoLimpo: true,
+      parteAutor: true,
+      parteReu: true,
+      comarca: true,
+      classeProcessual: true,
+      siglaTribunal: true,
+      createdAt: true,
+      advogado: {
+        select: { nome: true, oab: true },
+      },
+    },
+  });
+
+  res.json({
+    numeroProcesso,
+    totalAndamentos: publicacoes.length,
+    andamentos: publicacoes.map((p) => ({
+      id: p.id,
+      dataPublicacao: p.dataPublicacao,
+      tipoComunicacao: p.tipoComunicacao,
+      textoComunicacao: p.textoComunicacao,
+      textoLimpo: p.textoLimpo,
+      parteAutor: p.parteAutor,
+      parteReu: p.parteReu,
+      comarca: p.comarca,
+      classeProcessual: p.classeProcessual,
+      siglaTribunal: p.siglaTribunal,
+      advogado: p.advogado.nome,
+      criadoEm: p.createdAt,
+    })),
+  });
 });
 
 export default router;

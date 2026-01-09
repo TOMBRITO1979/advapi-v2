@@ -6,6 +6,8 @@ import consultaRoutes from './consulta.routes.js';
 import dashboardRoutes from './dashboard.routes.js';
 import authRoutes from './auth.routes.js';
 import webhookRoutes from './webhook.routes.js';
+import logsRoutes from './logs.routes.js';
+import apikeysRoutes from './apikeys.routes.js';
 
 export const router = Router();
 
@@ -20,4 +22,6 @@ router.use('/consulta', consultaRoutes);
 router.use('/advogados', advogadoRoutes);
 router.use('/publicacoes', publicacaoRoutes);
 router.use('/proxies', proxyRoutes);
+router.use('/logs', logsRoutes);
 router.use('/dashboard', dashboardRoutes);
+router.use('/api-keys', apikeysRoutes);

@@ -23,6 +23,7 @@ export class CallbackService {
     }
 
     const resultados = { sucesso: 0, falhas: 0 };
+    const errosDetalhados: any[] = [];
 
     for (const publicacao of publicacoes) {
       try {
@@ -59,20 +60,72 @@ export class CallbackService {
             data: {
               enviadoAdvwell: true,
               enviadoEm: new Date(),
+              status: 'ENVIADA',
             },
           });
         } else {
           resultados.falhas++;
+          const errorMsg = `HTTP ${response.status}: ${response.statusText}`;
           console.error(`[Callback] Erro HTTP: ${response.status}`);
+          errosDetalhados.push({
+            processo: publicacao.numeroProcesso,
+            erro: errorMsg,
+          });
+
+          // Marca publicacao com erro
+          await prisma.publicacao.updateMany({
+            where: {
+              advogadoId,
+              numeroProcesso: publicacao.numeroProcesso,
+            },
+            data: {
+              status: 'ERRO',
+            },
+          });
         }
       } catch (error: any) {
         resultados.falhas++;
         console.error(`[Callback] Erro ao enviar: ${error.message}`);
+        errosDetalhados.push({
+          processo: publicacao.numeroProcesso,
+          erro: error.message,
+        });
+
+        // Marca publicacao com erro
+        await prisma.publicacao.updateMany({
+          where: {
+            advogadoId,
+            numeroProcesso: publicacao.numeroProcesso,
+          },
+          data: {
+            status: 'ERRO',
+          },
+        });
       }
 
       // Pequeno delay entre envios
       await new Promise((r) => setTimeout(r, 100));
     }
+
+    // Registra log de execucao
+    await prisma.execucaoLog.create({
+      data: {
+        tipo: 'ENVIO',
+        descricao: `Callback para ${advogado.nome}`,
+        detalhes: {
+          advogadoId,
+          advogadoNome: advogado.nome,
+          callbackUrl: advogado.callbackUrl,
+          totalEnviadas: publicacoes.length,
+          sucesso: resultados.sucesso,
+          falhas: resultados.falhas,
+          erros: errosDetalhados,
+        },
+        publicacoesEncontradas: publicacoes.length,
+        publicacoesNovas: resultados.sucesso,
+        erros: resultados.falhas,
+      },
+    });
 
     console.log(`[Callback] Enviadas ${resultados.sucesso} publicacoes, ${resultados.falhas} falhas`);
     return resultados;

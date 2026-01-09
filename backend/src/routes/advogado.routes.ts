@@ -155,7 +155,7 @@ router.put('/:id', async (req: AuthRequest, res) => {
 
 /**
  * DELETE /api/advogados/:id
- * Remove advogado (soft delete - desativa)
+ * Remove advogado permanentemente (e todas as publicacoes/consultas relacionadas)
  */
 router.delete('/:id', async (req: AuthRequest, res) => {
   const advogado = await prisma.advogado.findUnique({
@@ -166,20 +166,33 @@ router.delete('/:id', async (req: AuthRequest, res) => {
     throw new AppError('Advogado nao encontrado', 404);
   }
 
-  await prisma.advogado.update({
-    where: { id: req.params.id },
-    data: { ativo: false },
-  });
+  // Deleta em cascata: primeiro as dependencias, depois o advogado
+  await prisma.$transaction([
+    // Remove publicacoes
+    prisma.publicacao.deleteMany({
+      where: { advogadoId: req.params.id },
+    }),
+    // Remove consultas
+    prisma.consulta.deleteMany({
+      where: { advogadoId: req.params.id },
+    }),
+    // Remove o advogado
+    prisma.advogado.delete({
+      where: { id: req.params.id },
+    }),
+  ]);
 
-  res.json({ message: 'Advogado desativado' });
+  res.json({ message: 'Advogado excluido permanentemente' });
 });
 
 /**
  * POST /api/advogados/:id/consultar
  * Dispara nova consulta para um advogado
+ * - Se nunca foi consultado: busca historico completo (12 meses)
+ * - Se ja foi consultado: busca apenas atualizacoes desde ultima consulta
  */
 router.post('/:id/consultar', async (req: AuthRequest, res) => {
-  const { dataInicio, dataFim, tribunal } = req.body;
+  const { dataInicio, dataFim, tribunal, forcarHistorico } = req.body;
   const { adicionarConsulta } = await import('../utils/queue.js');
 
   const advogado = await prisma.advogado.findUnique({
@@ -191,8 +204,29 @@ router.post('/:id/consultar', async (req: AuthRequest, res) => {
   }
 
   const hoje = new Date();
-  const inicio = dataInicio || new Date(hoje.getFullYear() - 1, hoje.getMonth(), hoje.getDate()).toISOString().split('T')[0];
   const fim = dataFim || hoje.toISOString().split('T')[0];
+
+  let inicio: string;
+  let tipoBusca: string;
+
+  if (dataInicio) {
+    // Data especifica informada
+    inicio = dataInicio;
+    tipoBusca = 'PERSONALIZADA';
+  } else if (forcarHistorico || !advogado.ultimaConsulta) {
+    // PRIMEIRA CONSULTA ou forcado: busca ultimos 12 meses
+    inicio = new Date(hoje.getFullYear() - 1, hoje.getMonth(), hoje.getDate()).toISOString().split('T')[0];
+    tipoBusca = 'HISTORICO_COMPLETO';
+  } else {
+    // JA FOI CONSULTADO: busca desde ultima consulta
+    const ultimaConsulta = new Date(advogado.ultimaConsulta);
+    // Margem de 1 dia para garantir
+    ultimaConsulta.setDate(ultimaConsulta.getDate() - 1);
+    inicio = ultimaConsulta.toISOString().split('T')[0];
+    tipoBusca = 'ATUALIZACAO';
+  }
+
+  console.log(`[Dashboard] Advogado: ${advogado.nome} | Tipo: ${tipoBusca} | Periodo: ${inicio} a ${fim}`);
 
   const consulta = await prisma.consulta.create({
     data: {
@@ -217,6 +251,8 @@ router.post('/:id/consultar', async (req: AuthRequest, res) => {
     message: 'Consulta adicionada na fila',
     consultaId: consulta.id,
     jobId,
+    tipoBusca,
+    periodo: { inicio, fim },
   });
 });
 

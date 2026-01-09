@@ -7,17 +7,27 @@ import {
   FileText,
   Server,
   Activity,
+  BarChart3,
+  Database,
   LogOut,
   Menu,
   X,
+  Bell,
+  Cpu,
+  Key,
 } from 'lucide-react';
 
 const menuItems = [
   { path: '/', label: 'Dashboard', icon: LayoutDashboard },
   { path: '/advogados', label: 'Advogados', icon: Users },
   { path: '/publicacoes', label: 'Publicacoes', icon: FileText },
+  { path: '/banco', label: 'Banco de Dados', icon: Database },
   { path: '/proxies', label: 'Proxies', icon: Server },
   { path: '/fila', label: 'Fila', icon: Activity },
+  { path: '/workers', label: 'Workers', icon: Cpu },
+  { path: '/logs', label: 'Logs / Alertas', icon: Bell },
+  { path: '/metricas', label: 'Metricas', icon: BarChart3 },
+  { path: '/api-keys', label: 'API Keys', icon: Key },
 ];
 
 export default function Layout({ children }: { children: ReactNode }) {

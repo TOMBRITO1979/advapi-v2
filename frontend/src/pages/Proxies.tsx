@@ -8,6 +8,10 @@ import {
   Server,
   CheckCircle,
   XCircle,
+  RefreshCw,
+  RotateCcw,
+  AlertTriangle,
+  Filter,
 } from 'lucide-react';
 
 interface Proxy {
@@ -17,9 +21,14 @@ interface Proxy {
   usuario: string | null;
   tipo: string;
   ativo: boolean;
+  funcionando: boolean;
   usosHoje: number;
   falhasConsecutivas: number;
   ultimoUso: string | null;
+  ultimoErro: string | null;
+  totalConsultas: number;
+  consultasSucesso: number;
+  consultasFalha: number;
 }
 
 interface Stats {
@@ -30,11 +39,14 @@ interface Stats {
   disponiveis: number;
 }
 
+type FiltroStatus = 'todos' | 'funcionando' | 'falhos';
+
 export default function Proxies() {
   const [proxies, setProxies] = useState<Proxy[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
+  const [filtroStatus, setFiltroStatus] = useState<FiltroStatus>('todos');
   const [novoProxy, setNovoProxy] = useState({
     host: '',
     porta: '',
@@ -52,7 +64,7 @@ export default function Proxies() {
     try {
       setLoading(true);
       const [proxiesRes, statsRes] = await Promise.all([
-        proxiesService.listar(),
+        proxiesService.listar({ limit: 500 }),
         proxiesService.getEstatisticas(),
       ]);
       setProxies(proxiesRes.data.data);
@@ -94,7 +106,6 @@ export default function Proxies() {
       alert(error.response?.data?.error || 'Erro ao fazer upload');
     }
 
-    // Limpa input
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
@@ -124,6 +135,46 @@ export default function Proxies() {
       console.error('Erro ao testar proxy:', error);
     }
   };
+
+  const resetarProxy = async (id: string) => {
+    try {
+      await proxiesService.resetar(id);
+      carregarDados();
+    } catch (error) {
+      console.error('Erro ao resetar proxy:', error);
+    }
+  };
+
+  const resetarTodos = async () => {
+    if (!confirm('Resetar status de todos os proxies com falha?')) return;
+
+    try {
+      const res = await proxiesService.resetarTodos();
+      alert(res.data.message);
+      carregarDados();
+    } catch (error) {
+      console.error('Erro ao resetar proxies:', error);
+    }
+  };
+
+  const excluirFalhos = async () => {
+    if (!confirm('Excluir TODOS os proxies que nao estao funcionando? Esta acao nao pode ser desfeita!')) return;
+
+    try {
+      const res = await proxiesService.excluirFalhos();
+      alert(res.data.message);
+      carregarDados();
+    } catch (error) {
+      console.error('Erro ao excluir proxies:', error);
+    }
+  };
+
+  // Filtra proxies
+  const proxiesFiltrados = proxies.filter((proxy) => {
+    if (filtroStatus === 'funcionando') return proxy.funcionando;
+    if (filtroStatus === 'falhos') return !proxy.funcionando;
+    return true;
+  });
 
   return (
     <div>
@@ -156,7 +207,7 @@ export default function Proxies() {
 
       {/* Cards de estatisticas */}
       {stats && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
           <div className="bg-white rounded-lg shadow p-4">
             <div className="flex items-center">
               <Server className="h-8 w-8 text-blue-500" />
@@ -180,7 +231,7 @@ export default function Proxies() {
               <XCircle className="h-8 w-8 text-red-500" />
               <div className="ml-3">
                 <p className="text-sm text-gray-500">Com Falhas</p>
-                <p className="text-xl font-bold">{stats.comFalhas}</p>
+                <p className="text-xl font-bold text-red-600">{stats.comFalhas}</p>
               </div>
             </div>
           </div>
@@ -193,8 +244,69 @@ export default function Proxies() {
               </div>
             </div>
           </div>
+          <div className="bg-white rounded-lg shadow p-4">
+            <div className="flex items-center">
+              <AlertTriangle className="h-8 w-8 text-yellow-500" />
+              <div className="ml-3">
+                <p className="text-sm text-gray-500">Inativos</p>
+                <p className="text-xl font-bold">{stats.inativos}</p>
+              </div>
+            </div>
+          </div>
         </div>
       )}
+
+      {/* Barra de acoes */}
+      <div className="bg-white rounded-lg shadow p-4 mb-6">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          {/* Filtros */}
+          <div className="flex items-center gap-2">
+            <Filter size={20} className="text-gray-500" />
+            <select
+              value={filtroStatus}
+              onChange={(e) => setFiltroStatus(e.target.value as FiltroStatus)}
+              className="px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="todos">Todos ({proxies.length})</option>
+              <option value="funcionando">
+                Funcionando ({proxies.filter((p) => p.funcionando).length})
+              </option>
+              <option value="falhos">
+                Com Falhas ({proxies.filter((p) => !p.funcionando).length})
+              </option>
+            </select>
+          </div>
+
+          {/* Acoes em lote */}
+          <div className="flex gap-2">
+            <button
+              onClick={carregarDados}
+              className="flex items-center px-3 py-2 text-gray-600 hover:text-gray-900 border rounded-lg hover:bg-gray-50"
+            >
+              <RefreshCw size={18} className="mr-2" />
+              Atualizar
+            </button>
+            {stats && stats.comFalhas > 0 && (
+              <>
+                <button
+                  onClick={resetarTodos}
+                  className="flex items-center px-3 py-2 text-yellow-600 hover:text-yellow-800 border border-yellow-300 rounded-lg hover:bg-yellow-50"
+                >
+                  <RotateCcw size={18} className="mr-2" />
+                  Resetar Falhos ({stats.comFalhas})
+                </button>
+                <button
+                  onClick={excluirFalhos}
+                  className="flex items-center px-3 py-2 text-red-600 hover:text-red-800 border border-red-300 rounded-lg hover:bg-red-50"
+                >
+                  <Trash2 size={18} className="mr-2" />
+                  Excluir Falhos ({stats.comFalhas})
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
 
       {/* Tabela */}
       <div className="bg-white rounded-lg shadow overflow-hidden">
@@ -202,10 +314,14 @@ export default function Proxies() {
           <div className="p-8 text-center">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
           </div>
-        ) : proxies.length === 0 ? (
+        ) : proxiesFiltrados.length === 0 ? (
           <div className="p-8 text-center text-gray-500">
             <Server className="mx-auto h-12 w-12 text-gray-300 mb-4" />
-            Nenhum proxy cadastrado
+            {filtroStatus === 'todos'
+              ? 'Nenhum proxy cadastrado'
+              : filtroStatus === 'funcionando'
+              ? 'Nenhum proxy funcionando'
+              : 'Nenhum proxy com falhas'}
           </div>
         ) : (
           <table className="min-w-full divide-y divide-gray-200">
@@ -221,10 +337,13 @@ export default function Proxies() {
                   Tipo
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Usos Hoje
+                  Usos
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Status
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Erro
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Acoes
@@ -232,16 +351,14 @@ export default function Proxies() {
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
-              {proxies.map((proxy) => (
-                <tr key={proxy.id}>
+              {proxiesFiltrados.map((proxy) => (
+                <tr key={proxy.id} className={!proxy.funcionando ? 'bg-red-50' : ''}>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="text-sm font-medium text-gray-900">
                       {proxy.host}
                     </div>
                     {proxy.usuario && (
-                      <div className="text-xs text-gray-500">
-                        {proxy.usuario}
-                      </div>
+                      <div className="text-xs text-gray-500">{proxy.usuario}</div>
                     )}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
@@ -250,13 +367,18 @@ export default function Proxies() {
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 uppercase">
                     {proxy.tipo}
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                    {proxy.usosHoje}
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <div className="text-sm text-gray-900">{proxy.totalConsultas || 0}</div>
+                    <div className="text-xs text-gray-500">
+                      <span className="text-green-600">{proxy.consultasSucesso || 0}</span>
+                      {' / '}
+                      <span className="text-red-600">{proxy.consultasFalha || 0}</span>
+                    </div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
-                    {proxy.falhasConsecutivas > 0 ? (
+                    {!proxy.funcionando ? (
                       <span className="px-2 py-1 text-xs rounded-full bg-red-100 text-red-800">
-                        {proxy.falhasConsecutivas} falhas
+                        Falhou
                       </span>
                     ) : proxy.ativo ? (
                       <span className="px-2 py-1 text-xs rounded-full bg-green-100 text-green-800">
@@ -268,6 +390,13 @@ export default function Proxies() {
                       </span>
                     )}
                   </td>
+                  <td className="px-6 py-4">
+                    {proxy.ultimoErro && (
+                      <div className="text-xs text-red-600 max-w-xs truncate" title={proxy.ultimoErro}>
+                        {proxy.ultimoErro}
+                      </div>
+                    )}
+                  </td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="flex gap-2">
                       <button
@@ -277,6 +406,15 @@ export default function Proxies() {
                       >
                         <Play size={20} />
                       </button>
+                      {!proxy.funcionando && (
+                        <button
+                          onClick={() => resetarProxy(proxy.id)}
+                          className="text-yellow-600 hover:text-yellow-800"
+                          title="Resetar status"
+                        >
+                          <RotateCcw size={20} />
+                        </button>
+                      )}
                       <button
                         onClick={() => excluirProxy(proxy.id)}
                         className="text-red-600 hover:text-red-800"

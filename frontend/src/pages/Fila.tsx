@@ -3,11 +3,16 @@ import { filaService } from '../services/api';
 import { Activity, Clock, CheckCircle, XCircle, RefreshCw } from 'lucide-react';
 
 interface QueueStatus {
-  waiting: number;
-  active: number;
-  completed: number;
-  failed: number;
-  delayed: number;
+  consultas: {
+    aguardando: number;
+    processando: number;
+    concluidas: number;
+    falhas: number;
+  };
+  envios: {
+    aguardando: number;
+    processando: number;
+  };
 }
 
 export default function Fila() {
@@ -52,36 +57,49 @@ export default function Fila() {
         </button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
+      {/* Consultas */}
+      <h2 className="text-lg font-semibold text-gray-700 mb-3">Consultas (Scraping)</h2>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <StatusCard
           title="Aguardando"
-          value={status?.waiting || 0}
+          value={status?.consultas?.aguardando || 0}
           icon={Clock}
           color="yellow"
         />
         <StatusCard
           title="Processando"
-          value={status?.active || 0}
+          value={status?.consultas?.processando || 0}
           icon={Activity}
           color="blue"
         />
         <StatusCard
           title="Concluidas"
-          value={status?.completed || 0}
+          value={status?.consultas?.concluidas || 0}
           icon={CheckCircle}
           color="green"
         />
         <StatusCard
           title="Falhas"
-          value={status?.failed || 0}
+          value={status?.consultas?.falhas || 0}
           icon={XCircle}
           color="red"
         />
+      </div>
+
+      {/* Envios */}
+      <h2 className="text-lg font-semibold text-gray-700 mb-3">Envios (AdvWell)</h2>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-4 mb-6">
         <StatusCard
-          title="Agendadas"
-          value={status?.delayed || 0}
+          title="Aguardando"
+          value={status?.envios?.aguardando || 0}
           icon={Clock}
-          color="purple"
+          color="yellow"
+        />
+        <StatusCard
+          title="Processando"
+          value={status?.envios?.processando || 0}
+          icon={Activity}
+          color="blue"
         />
       </div>
 

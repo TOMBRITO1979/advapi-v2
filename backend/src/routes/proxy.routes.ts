@@ -285,4 +285,64 @@ router.get('/stats/resumo', async (req: AuthRequest, res) => {
   });
 });
 
+/**
+ * POST /api/proxies/:id/resetar
+ * Reseta status do proxy (marca como funcionando novamente)
+ */
+router.post('/:id/resetar', async (req: AuthRequest, res) => {
+  const proxy = await prisma.proxy.findUnique({
+    where: { id: req.params.id },
+  });
+
+  if (!proxy) {
+    throw new AppError('Proxy nao encontrado', 404);
+  }
+
+  const atualizado = await prisma.proxy.update({
+    where: { id: req.params.id },
+    data: {
+      funcionando: true,
+      consultasFalha: 0,
+      ultimoErro: null,
+    },
+  });
+
+  res.json(atualizado);
+});
+
+/**
+ * DELETE /api/proxies/falhos
+ * Remove todos os proxies que nao estao funcionando
+ */
+router.delete('/falhos/todos', async (req: AuthRequest, res) => {
+  const resultado = await prisma.proxy.deleteMany({
+    where: { funcionando: false },
+  });
+
+  res.json({
+    message: `${resultado.count} proxies removidos`,
+    removidos: resultado.count,
+  });
+});
+
+/**
+ * POST /api/proxies/resetar-todos
+ * Reseta status de todos os proxies
+ */
+router.post('/resetar/todos', async (req: AuthRequest, res) => {
+  const resultado = await prisma.proxy.updateMany({
+    where: { funcionando: false },
+    data: {
+      funcionando: true,
+      consultasFalha: 0,
+      ultimoErro: null,
+    },
+  });
+
+  res.json({
+    message: `${resultado.count} proxies resetados`,
+    resetados: resultado.count,
+  });
+});
+
 export default router;

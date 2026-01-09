@@ -76,7 +76,7 @@ export const publicacoesService = {
 
 // Proxies
 export const proxiesService = {
-  listar: (params?: { ativo?: boolean; page?: number }) =>
+  listar: (params?: { ativo?: boolean; page?: number; limit?: number }) =>
     api.get('/proxies', { params }),
   criar: (data: any) => api.post('/proxies', data),
   atualizar: (id: string, data: any) => api.put(`/proxies/${id}`, data),
@@ -87,11 +87,54 @@ export const proxiesService = {
     return api.post('/proxies/upload', formData);
   },
   testar: (id: string) => api.post(`/proxies/${id}/testar`),
+  resetar: (id: string) => api.post(`/proxies/${id}/resetar`),
+  resetarTodos: () => api.post('/proxies/resetar/todos'),
+  excluirFalhos: () => api.delete('/proxies/falhos/todos'),
   getEstatisticas: () => api.get('/proxies/stats/resumo'),
 };
 
 // Fila
 export const filaService = {
-  getStatus: () => api.get('/consulta/fila/status'),
+  getStatus: () => api.get('/dashboard/fila'),
   getConsulta: (id: string) => api.get(`/consulta/${id}/status`),
+};
+
+// Metricas
+export const metricasService = {
+  getMetricas: () => api.get('/dashboard/metricas'),
+  getAtividade: (limit = 20) => api.get(`/dashboard/atividade?limit=${limit}`),
+};
+
+// Banco de Dados (todas as publicacoes)
+export const bancoDadosService = {
+  listar: (params?: {
+    advogado?: string;
+    processo?: string;
+    dataInicio?: string;
+    dataFim?: string;
+    page?: number;
+    limit?: number;
+  }) => api.get('/dashboard/publicacoes', { params }),
+};
+
+// Logs do Sistema
+export const logsService = {
+  listar: (params?: {
+    tipo?: string;
+    categoria?: string;
+    lido?: boolean;
+    page?: number;
+    limit?: number;
+  }) => api.get('/logs', { params }),
+  getStats: () => api.get('/logs/stats'),
+  marcarLido: (id: string) => api.put(`/logs/${id}/lido`),
+  marcarResolvido: (id: string) => api.put(`/logs/${id}/resolvido`),
+  marcarTodosLidos: () => api.post('/logs/marcar-todos-lidos'),
+  excluir: (id: string) => api.delete(`/logs/${id}`),
+  limparAntigos: () => api.delete('/logs/limpar/antigos'),
+};
+
+// Workers
+export const workersService = {
+  getStatus: () => api.get('/dashboard/workers'),
 };

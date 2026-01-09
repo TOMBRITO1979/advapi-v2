@@ -7,6 +7,11 @@ import Advogados from './pages/Advogados';
 import Publicacoes from './pages/Publicacoes';
 import Proxies from './pages/Proxies';
 import Fila from './pages/Fila';
+import Metricas from './pages/Metricas';
+import BancoDados from './pages/BancoDados';
+import Logs from './pages/Logs';
+import Workers from './pages/Workers';
+import ApiKeys from './pages/ApiKeys';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { token, loading } = useAuth();
@@ -41,6 +46,11 @@ export default function App() {
                 <Route path="/publicacoes" element={<Publicacoes />} />
                 <Route path="/proxies" element={<Proxies />} />
                 <Route path="/fila" element={<Fila />} />
+                <Route path="/workers" element={<Workers />} />
+                <Route path="/metricas" element={<Metricas />} />
+                <Route path="/banco" element={<BancoDados />} />
+                <Route path="/logs" element={<Logs />} />
+                <Route path="/api-keys" element={<ApiKeys />} />
               </Routes>
             </Layout>
           </ProtectedRoute>
