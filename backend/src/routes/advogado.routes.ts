@@ -214,16 +214,15 @@ router.post('/:id/consultar', async (req: AuthRequest, res) => {
     inicio = dataInicio;
     tipoBusca = 'PERSONALIZADA';
   } else if (forcarHistorico || !advogado.ultimaConsulta) {
-    // PRIMEIRA CONSULTA ou forcado: busca ultimos 12 meses
-    inicio = new Date(hoje.getFullYear() - 1, hoje.getMonth(), hoje.getDate()).toISOString().split('T')[0];
-    tipoBusca = 'HISTORICO_COMPLETO';
+    // PRIMEIRA CONSULTA ou forcado: busca ultimos 3 anos
+    inicio = new Date(hoje.getFullYear() - 3, hoje.getMonth(), hoje.getDate()).toISOString().split('T')[0];
+    tipoBusca = 'HISTORICO_3_ANOS';
   } else {
-    // JA FOI CONSULTADO: busca desde ultima consulta
-    const ultimaConsulta = new Date(advogado.ultimaConsulta);
-    // Margem de 1 dia para garantir
-    ultimaConsulta.setDate(ultimaConsulta.getDate() - 1);
-    inicio = ultimaConsulta.toISOString().split('T')[0];
-    tipoBusca = 'ATUALIZACAO';
+    // JA FOI CONSULTADO: busca ultimos 7 dias
+    const seteDiasAtras = new Date(hoje);
+    seteDiasAtras.setDate(hoje.getDate() - 7);
+    inicio = seteDiasAtras.toISOString().split('T')[0];
+    tipoBusca = 'ATUALIZACAO_7D';
   }
 
   console.log(`[Dashboard] Advogado: ${advogado.nome} | Tipo: ${tipoBusca} | Periodo: ${inicio} a ${fim}`);

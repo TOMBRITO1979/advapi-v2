@@ -531,6 +531,53 @@ router.get('/workers', async (req: AuthRequest, res) => {
 });
 
 /**
+ * GET /api/dashboard/publicacoes/:id
+ * Retorna todos os detalhes de uma publicacao especifica
+ */
+router.get('/publicacoes/:id', async (req: AuthRequest, res) => {
+  const { id } = req.params;
+
+  const publicacao = await prisma.publicacao.findUnique({
+    where: { id },
+    include: {
+      advogado: {
+        select: { nome: true, oab: true },
+      },
+    },
+  });
+
+  if (!publicacao) {
+    return res.status(404).json({ error: 'Publicacao nao encontrada' });
+  }
+
+  res.json({
+    id: publicacao.id,
+    advogado: publicacao.advogado.nome,
+    oab: publicacao.advogado.oab,
+    numeroProcesso: publicacao.numeroProcesso,
+    siglaTribunal: publicacao.siglaTribunal,
+    orgaoJulgador: publicacao.orgaoJulgador,
+    nomeOrgao: publicacao.nomeOrgao,
+    dataDisponibilizacao: publicacao.dataDisponibilizacao,
+    dataPublicacao: publicacao.dataPublicacao,
+    tipoComunicacao: publicacao.tipoComunicacao,
+    textoComunicacao: publicacao.textoComunicacao,
+    textoLimpo: publicacao.textoLimpo,
+    linkIntegra: publicacao.linkIntegra,
+    parteAutor: publicacao.parteAutor,
+    parteReu: publicacao.parteReu,
+    comarca: publicacao.comarca,
+    classeProcessual: publicacao.classeProcessual,
+    advogadosProcesso: publicacao.advogadosProcesso,
+    status: publicacao.status,
+    enviadoAdvwell: publicacao.enviadoAdvwell,
+    enviadoEm: publicacao.enviadoEm,
+    fonte: publicacao.fonte,
+    dataRaspagem: publicacao.createdAt,
+  });
+});
+
+/**
  * GET /api/dashboard/publicacoes
  * Lista todas as publicacoes do banco com filtros e paginacao
  */

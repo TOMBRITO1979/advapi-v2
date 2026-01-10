@@ -1,9 +1,7 @@
 import axios from 'axios';
 
-// Em produção, usa api.advtom.com; em dev, usa /api (proxy)
-const API_URL = import.meta.env.PROD
-  ? 'https://api.advtom.com/api'
-  : '/api';
+// Sempre usa /api (nginx faz proxy para o backend)
+const API_URL = '/api';
 
 const api = axios.create({
   baseURL: API_URL,
@@ -115,6 +113,7 @@ export const bancoDadosService = {
     page?: number;
     limit?: number;
   }) => api.get('/dashboard/publicacoes', { params }),
+  buscar: (id: string) => api.get(`/dashboard/publicacoes/${id}`),
 };
 
 // Logs do Sistema

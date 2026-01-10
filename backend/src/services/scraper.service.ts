@@ -341,6 +341,9 @@ export class ScraperService {
           ? item.advogados.map((adv: { nome: string; numeroOab?: string }) => ({ nome: adv.nome, oab: adv.numeroOab || null }))
           : null;
 
+        // Usa nomeOrgao da API se disponivel, senao extrai do texto
+        const nomeOrgao = item.nomeOrgao || dadosExtraidos.nomeOrgao || null;
+
         processos.push({
           numeroProcesso: item.numeroProcesso,
           siglaTribunal: item.siglaTribunal || this.extrairTribunalDoNumero(item.numeroProcesso),
@@ -353,7 +356,7 @@ export class ScraperService {
           comarca: dadosExtraidos.comarca,
           classeProcessual: dadosExtraidos.classeProcessual,
           advogadosProcesso,
-          nomeOrgao: item.nomeOrgao || null,
+          nomeOrgao,
         });
       }
     }
@@ -582,6 +585,7 @@ export class ScraperService {
         pub.parteReu = dadosExtraidos.parteReu;
         pub.comarca = dadosExtraidos.comarca;
         pub.classeProcessual = dadosExtraidos.classeProcessual;
+        pub.nomeOrgao = dadosExtraidos.nomeOrgao || null;
       }
 
       processos.push(pub);
@@ -649,7 +653,7 @@ export class ScraperService {
   /**
    * Extrai dados estruturados do texto da publicacao
    */
-  extrairDadosEstruturados(texto: string | null): DadosExtraidos {
+  extrairDadosEstruturados(texto: string | null): DadosExtraidos & { nomeOrgao?: string | null } {
     if (!texto) {
       return {
         parteAutor: null,
@@ -657,6 +661,7 @@ export class ScraperService {
         comarca: null,
         classeProcessual: null,
         textoLimpo: '',
+        nomeOrgao: null,
       };
     }
 
@@ -665,32 +670,82 @@ export class ScraperService {
 
     // Extrai AUTOR - busca entre "AUTOR:" e "REU:" ou "RÉU:"
     let parteAutor: string | null = null;
-    const autorMatch = texto.match(/AUTOR[ES]?:\s*([^]*?)(?=R[ÉE]U|REQUERIDO|EXECUTADO|APELADO|$)/i);
-    if (autorMatch && autorMatch[1]) {
-      parteAutor = this.limparNomeParte(autorMatch[1]);
+    const autorPatterns = [
+      /AUTOR[ES]?:\s*([^]*?)(?=R[ÉE]U|REQUERIDO|EXECUTADO|APELADO|ADVOGADO|OAB|$)/i,
+      /REQUERENTE[S]?:\s*([^]*?)(?=REQUERIDO|R[ÉE]U|ADVOGADO|OAB|$)/i,
+      /EXEQUENTE[S]?:\s*([^]*?)(?=EXECUTADO|R[ÉE]U|ADVOGADO|OAB|$)/i,
+      /RECLAMANTE[S]?:\s*([^]*?)(?=RECLAMAD[OA]|R[ÉE]U|ADVOGADO|OAB|$)/i,
+      /APELANTE[S]?:\s*([^]*?)(?=APELAD[OA]|R[ÉE]U|ADVOGADO|OAB|$)/i,
+      /AGRAVANTE[S]?:\s*([^]*?)(?=AGRAVAD[OA]|R[ÉE]U|ADVOGADO|OAB|$)/i,
+    ];
+    for (const pattern of autorPatterns) {
+      const match = texto.match(pattern);
+      if (match && match[1]) {
+        parteAutor = this.limparNomeParte(match[1]);
+        if (parteAutor) break;
+      }
     }
 
     // Extrai REU - busca entre "REU:" e proxima secao
     let parteReu: string | null = null;
-    const reuMatch = texto.match(/(?:R[ÉE]US?|REQUERIDOS?|EXECUTADOS?|APELADOS?):\s*([^]*?)(?=SENTEN[CÇ]|DECIS[AÃ]O|DESPACHO|INTIMA[CÇ][AÃ]O|CITA[CÇ][AÃ]O|Vistos|Ante|Diante|Trata-se|$)/i);
-    if (reuMatch && reuMatch[1]) {
-      parteReu = this.limparNomeParte(reuMatch[1]);
+    const reuPatterns = [
+      /(?:R[ÉE]US?|REQUERIDOS?|EXECUTADOS?|APELADOS?):\s*([^]*?)(?=SENTEN[CÇ]|DECIS[AÃ]O|DESPACHO|INTIMA[CÇ][AÃ]O|CITA[CÇ][AÃ]O|Vistos|Ante|Diante|Trata-se|ADVOGADO|OAB|$)/i,
+      /RECLAMAD[OA][S]?:\s*([^]*?)(?=SENTEN[CÇ]|DECIS[AÃ]O|DESPACHO|ADVOGADO|OAB|$)/i,
+      /AGRAVAD[OA][S]?:\s*([^]*?)(?=SENTEN[CÇ]|DECIS[AÃ]O|DESPACHO|ADVOGADO|OAB|$)/i,
+    ];
+    for (const pattern of reuPatterns) {
+      const match = texto.match(pattern);
+      if (match && match[1]) {
+        parteReu = this.limparNomeParte(match[1]);
+        if (parteReu) break;
+      }
     }
 
     // Extrai COMARCA
     let comarca: string | null = null;
-    const comarcaMatch = texto.match(/Comarca\s+(?:da\s+|de\s+)?([^\n,]+?)(?:\s+Pal[aá]cio|\s+Rua|\s+Avenida|\s+Travessa|\s+CEP|\n|,)/i);
-    if (comarcaMatch && comarcaMatch[1]) {
-      comarca = comarcaMatch[1].trim().replace(/\s+/g, ' ');
-      // Remove "Regional" se for seguido de mais texto
-      comarca = comarca.replace(/^Regional\s+(?:da\s+|de\s+)?/i, 'Regional ');
+    const comarcaPatterns = [
+      /Comarca\s+(?:da\s+|de\s+)?([^\n,<]+?)(?:\s+Pal[aá]cio|\s+Rua|\s+Avenida|\s+Travessa|\s+CEP|\n|,|<)/i,
+      /(?:Foro|Vara)\s+(?:da\s+|de\s+|do\s+)?Comarca\s+(?:da\s+|de\s+)?([^\n,<]+)/i,
+    ];
+    for (const pattern of comarcaPatterns) {
+      const match = texto.match(pattern);
+      if (match && match[1]) {
+        comarca = match[1].trim().replace(/\s+/g, ' ');
+        comarca = comarca.replace(/^Regional\s+(?:da\s+|de\s+)?/i, 'Regional ');
+        if (comarca && comarca.length > 3) break;
+      }
     }
 
     // Extrai CLASSE PROCESSUAL
     let classeProcessual: string | null = null;
-    const classeMatch = texto.match(/Classe[:\s]+([^\n(]+?)(?:\s*\(|\n|$)/i);
-    if (classeMatch && classeMatch[1]) {
-      classeProcessual = classeMatch[1].trim().toUpperCase();
+    const classePatterns = [
+      /Classe[:\s]+([^\n(<]+?)(?:\s*\(|\n|<|$)/i,
+      /Classe\s+Processual[:\s]+([^\n(<]+?)(?:\s*\(|\n|<|$)/i,
+      /(?:Ação|Acao|Procedimento)[:\s]+([^\n(<]+?)(?:\s*\(|\n|<|$)/i,
+    ];
+    for (const pattern of classePatterns) {
+      const match = texto.match(pattern);
+      if (match && match[1]) {
+        classeProcessual = match[1].trim().toUpperCase();
+        if (classeProcessual && classeProcessual.length > 3) break;
+      }
+    }
+
+    // Extrai ORGAO JULGADOR do texto
+    let nomeOrgao: string | null = null;
+    const orgaoPatterns = [
+      /[ÓO]rg[ãa]o[:\s]+([^\n<]+?)(?:\s+Data|\s+Processo|\n|<|$)/i,
+      /[ÓO]rg[ãa]o\s+Julgador[:\s]+([^\n<]+?)(?:\s+Data|\s+Processo|\n|<|$)/i,
+      /Vara[:\s]+(\d+[ªºa]\s+Vara[^\n<]+?)(?:\s+Data|\s+Processo|\n|<|$)/i,
+      /distribu[ií]do\s+para\s+([^\n<]+?)(?:\s+na\s+data|\n|<|$)/i,
+      /Gabinete[:\s]+(\d+[^\n<]+?)(?:\s+Data|\n|<|$)/i,
+    ];
+    for (const pattern of orgaoPatterns) {
+      const match = texto.match(pattern);
+      if (match && match[1]) {
+        nomeOrgao = match[1].trim().replace(/\s+/g, ' ');
+        if (nomeOrgao && nomeOrgao.length > 3) break;
+      }
     }
 
     return {
@@ -699,6 +754,7 @@ export class ScraperService {
       comarca,
       classeProcessual,
       textoLimpo,
+      nomeOrgao,
     };
   }
 

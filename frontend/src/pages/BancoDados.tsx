@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { bancoDadosService } from '../services/api';
-import { Search, Database, Calendar, Filter } from 'lucide-react';
+import { Search, Database, Calendar, Filter, X, ExternalLink, User, Scale, FileText } from 'lucide-react';
 import { format } from 'date-fns';
 
 interface PublicacaoDB {
@@ -16,6 +16,37 @@ interface PublicacaoDB {
   dataRaspagem: string;
 }
 
+interface AdvogadoProcesso {
+  nome: string;
+  oab?: string | null;
+}
+
+interface PublicacaoDetalhes {
+  id: string;
+  advogado: string;
+  oab: string | null;
+  numeroProcesso: string;
+  siglaTribunal: string | null;
+  orgaoJulgador: string | null;
+  nomeOrgao: string | null;
+  dataDisponibilizacao: string | null;
+  dataPublicacao: string | null;
+  tipoComunicacao: string | null;
+  textoComunicacao: string | null;
+  textoLimpo: string | null;
+  linkIntegra: string | null;
+  parteAutor: string | null;
+  parteReu: string | null;
+  comarca: string | null;
+  classeProcessual: string | null;
+  advogadosProcesso: AdvogadoProcesso[] | null;
+  status: string;
+  enviadoAdvwell: boolean;
+  enviadoEm: string | null;
+  fonte: string;
+  dataRaspagem: string;
+}
+
 export default function BancoDados() {
   const [publicacoes, setPublicacoes] = useState<PublicacaoDB[]>([]);
   const [loading, setLoading] = useState(true);
@@ -26,10 +57,24 @@ export default function BancoDados() {
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [total, setTotal] = useState(0);
+  const [selected, setSelected] = useState<PublicacaoDetalhes | null>(null);
+  const [loadingDetalhes, setLoadingDetalhes] = useState(false);
 
   useEffect(() => {
     carregarDados();
   }, [page]);
+
+  const abrirDetalhes = async (id: string) => {
+    try {
+      setLoadingDetalhes(true);
+      const res = await bancoDadosService.buscar(id);
+      setSelected(res.data);
+    } catch (error) {
+      console.error('Erro ao carregar detalhes:', error);
+    } finally {
+      setLoadingDetalhes(false);
+    }
+  };
 
   const carregarDados = async () => {
     try {
@@ -216,7 +261,11 @@ export default function BancoDados() {
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
                 {publicacoes.map((pub) => (
-                  <tr key={pub.id} className="hover:bg-gray-50">
+                  <tr
+                    key={pub.id}
+                    className="hover:bg-blue-50 cursor-pointer transition-colors"
+                    onClick={() => abrirDetalhes(pub.id)}
+                  >
                     <td className="px-4 py-3">
                       <div className="text-sm font-medium text-gray-900">
                         {pub.advogado}
@@ -300,6 +349,222 @@ export default function BancoDados() {
           </div>
         )}
       </div>
+
+      {/* Modal de Detalhes */}
+      {(selected || loadingDetalhes) && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+            {/* Header */}
+            <div className="px-6 py-4 border-b flex items-center justify-between bg-gray-50">
+              <div className="flex items-center gap-3">
+                <Scale className="text-blue-600" size={24} />
+                <h2 className="text-xl font-bold text-gray-900">Detalhes do Processo</h2>
+              </div>
+              <button
+                onClick={() => setSelected(null)}
+                className="p-2 hover:bg-gray-200 rounded-full transition-colors"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Content */}
+            {loadingDetalhes ? (
+              <div className="p-8 flex-1 flex items-center justify-center">
+                <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600"></div>
+              </div>
+            ) : selected && (
+              <div className="p-6 overflow-y-auto flex-1">
+                {/* Numero do Processo */}
+                <div className="mb-6">
+                  <h3 className="text-lg font-mono font-bold text-blue-800 mb-1">
+                    {selected.numeroProcesso}
+                  </h3>
+                  <div className="flex flex-wrap gap-2">
+                    {selected.siglaTribunal && (
+                      <span className="px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded">
+                        {selected.siglaTribunal}
+                      </span>
+                    )}
+                    {selected.classeProcessual && (
+                      <span className="px-2 py-1 bg-purple-100 text-purple-800 text-xs rounded">
+                        {selected.classeProcessual}
+                      </span>
+                    )}
+                    <span className={`px-2 py-1 text-xs rounded ${
+                      selected.status === 'NOVA' ? 'bg-blue-100 text-blue-800' :
+                      selected.status === 'ENVIADA' ? 'bg-green-100 text-green-800' :
+                      'bg-gray-100 text-gray-800'
+                    }`}>
+                      {selected.status}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Grid de informacoes */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                  {/* Coluna 1 */}
+                  <div className="space-y-4">
+                    {/* Advogado Monitorado */}
+                    <div>
+                      <label className="text-xs font-medium text-gray-500 uppercase">Advogado Monitorado</label>
+                      <div className="flex items-center gap-2 mt-1">
+                        <User size={16} className="text-gray-400" />
+                        <span className="font-medium">{selected.advogado}</span>
+                        {selected.oab && (
+                          <span className="text-sm text-gray-500">OAB: {selected.oab}</span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Partes */}
+                    {selected.parteAutor && (
+                      <div>
+                        <label className="text-xs font-medium text-gray-500 uppercase">Autor</label>
+                        <p className="text-sm mt-1">{selected.parteAutor}</p>
+                      </div>
+                    )}
+                    {selected.parteReu && (
+                      <div>
+                        <label className="text-xs font-medium text-gray-500 uppercase">Reu</label>
+                        <p className="text-sm mt-1">{selected.parteReu}</p>
+                      </div>
+                    )}
+
+                    {/* Comarca */}
+                    {selected.comarca && (
+                      <div>
+                        <label className="text-xs font-medium text-gray-500 uppercase">Comarca</label>
+                        <p className="text-sm mt-1">{selected.comarca}</p>
+                      </div>
+                    )}
+
+                    {/* Orgao */}
+                    {(selected.nomeOrgao || selected.orgaoJulgador) && (
+                      <div>
+                        <label className="text-xs font-medium text-gray-500 uppercase">Orgao Julgador</label>
+                        <p className="text-sm mt-1">{selected.nomeOrgao || selected.orgaoJulgador}</p>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Coluna 2 */}
+                  <div className="space-y-4">
+                    {/* Datas */}
+                    <div className="grid grid-cols-2 gap-4">
+                      {selected.dataPublicacao && (
+                        <div>
+                          <label className="text-xs font-medium text-gray-500 uppercase">Data Publicacao</label>
+                          <p className="text-sm mt-1">
+                            {format(new Date(selected.dataPublicacao), 'dd/MM/yyyy')}
+                          </p>
+                        </div>
+                      )}
+                      {selected.dataDisponibilizacao && (
+                        <div>
+                          <label className="text-xs font-medium text-gray-500 uppercase">Disponibilizacao</label>
+                          <p className="text-sm mt-1">
+                            {format(new Date(selected.dataDisponibilizacao), 'dd/MM/yyyy')}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Tipo Comunicacao */}
+                    {selected.tipoComunicacao && (
+                      <div>
+                        <label className="text-xs font-medium text-gray-500 uppercase">Tipo de Comunicacao</label>
+                        <p className="text-sm mt-1">{selected.tipoComunicacao}</p>
+                      </div>
+                    )}
+
+                    {/* Envio */}
+                    <div>
+                      <label className="text-xs font-medium text-gray-500 uppercase">Enviado para AdvWell</label>
+                      <p className="text-sm mt-1">
+                        {selected.enviadoAdvwell ? (
+                          <span className="text-green-600">
+                            Sim {selected.enviadoEm && `- ${format(new Date(selected.enviadoEm), 'dd/MM/yyyy HH:mm')}`}
+                          </span>
+                        ) : (
+                          <span className="text-gray-500">Nao</span>
+                        )}
+                      </p>
+                    </div>
+
+                    {/* Data Raspagem */}
+                    <div>
+                      <label className="text-xs font-medium text-gray-500 uppercase">Data da Raspagem</label>
+                      <p className="text-sm mt-1">
+                        {format(new Date(selected.dataRaspagem), 'dd/MM/yyyy HH:mm:ss')}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Advogados do Processo */}
+                {selected.advogadosProcesso && selected.advogadosProcesso.length > 0 && (
+                  <div className="mb-6">
+                    <label className="text-xs font-medium text-gray-500 uppercase mb-2 block">
+                      Advogados no Processo ({selected.advogadosProcesso.length})
+                    </label>
+                    <div className="bg-gray-50 rounded-lg p-3">
+                      <div className="flex flex-wrap gap-2">
+                        {selected.advogadosProcesso.map((adv, idx) => (
+                          <div key={idx} className="bg-white px-3 py-2 rounded border text-sm">
+                            <span className="font-medium">{adv.nome}</span>
+                            {adv.oab && <span className="text-gray-500 ml-2">OAB: {adv.oab}</span>}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Texto da Publicacao */}
+                {(selected.textoLimpo || selected.textoComunicacao) && (
+                  <div>
+                    <div className="flex items-center gap-2 mb-2">
+                      <FileText size={16} className="text-gray-500" />
+                      <label className="text-xs font-medium text-gray-500 uppercase">
+                        Texto da Publicacao
+                      </label>
+                    </div>
+                    <div className="bg-gray-50 rounded-lg p-4 text-sm text-gray-700 max-h-60 overflow-y-auto whitespace-pre-wrap">
+                      {selected.textoLimpo || selected.textoComunicacao}
+                    </div>
+                  </div>
+                )}
+
+                {/* Link Integra */}
+                {selected.linkIntegra && (
+                  <div className="mt-4">
+                    <a
+                      href={selected.linkIntegra}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-2 text-blue-600 hover:text-blue-800"
+                    >
+                      <ExternalLink size={16} />
+                      Ver publicacao original
+                    </a>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Footer */}
+            <div className="px-6 py-4 border-t bg-gray-50 flex justify-end">
+              <button
+                onClick={() => setSelected(null)}
+                className="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 transition-colors"
+              >
+                Fechar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
