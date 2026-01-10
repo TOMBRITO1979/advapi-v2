@@ -84,6 +84,8 @@ const worker = new Worker<ConsultaJob>(
               parteReu: processo.parteReu,
               comarca: processo.comarca,
               classeProcessual: processo.classeProcessual,
+              advogadosProcesso: processo.advogadosProcesso ? JSON.parse(JSON.stringify(processo.advogadosProcesso)) : undefined,
+              nomeOrgao: processo.nomeOrgao,
               status: 'NOVA',
             },
           });
@@ -281,13 +283,13 @@ async function agendarConsultasAutomaticas(): Promise<void> {
     // Define periodo baseado se ja foi sincronizado antes
     let inicio: string;
     if (advogado.ultimaSincronizacao) {
-      // Ja foi sincronizado: busca desde ultima sincronizacao (com margem de 1 dia)
-      const dataInicio = new Date(advogado.ultimaSincronizacao);
-      dataInicio.setDate(dataInicio.getDate() - 1);
+      // Ja foi sincronizado: busca ultimos 7 dias
+      const dataInicio = new Date(hoje);
+      dataInicio.setDate(dataInicio.getDate() - 7);
       inicio = dataInicio.toISOString().split('T')[0];
     } else {
-      // Primeira sincronizacao: busca ultimos 12 meses
-      inicio = new Date(hoje.getFullYear() - 1, hoje.getMonth(), hoje.getDate())
+      // Primeira sincronizacao: busca ultimos 3 anos
+      inicio = new Date(hoje.getFullYear() - 3, hoje.getMonth(), hoje.getDate())
         .toISOString()
         .split('T')[0];
     }

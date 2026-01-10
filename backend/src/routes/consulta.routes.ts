@@ -78,18 +78,11 @@ router.post('/', async (req, res) => {
     inicio = dataInicio;
     tipoBusca = 'PERSONALIZADA';
   } else if (isNovoAdvogado) {
-    // NOVO ADVOGADO: busca ultimos 12 meses (historico completo)
-    inicio = new Date(hoje.getFullYear() - 1, hoje.getMonth(), hoje.getDate()).toISOString().split('T')[0];
-    tipoBusca = 'HISTORICO_COMPLETO';
-  } else if (advogado.ultimaConsulta) {
-    // ADVOGADO EXISTENTE: busca desde ultima consulta
-    const ultimaConsulta = new Date(advogado.ultimaConsulta);
-    // Adiciona 1 dia de margem para garantir que nao perca nada
-    ultimaConsulta.setDate(ultimaConsulta.getDate() - 1);
-    inicio = ultimaConsulta.toISOString().split('T')[0];
-    tipoBusca = 'ATUALIZACAO';
+    // NOVO ADVOGADO: busca ultimos 3 anos (historico completo)
+    inicio = new Date(hoje.getFullYear() - 3, hoje.getMonth(), hoje.getDate()).toISOString().split('T')[0];
+    tipoBusca = 'HISTORICO_3_ANOS';
   } else {
-    // Fallback: ultimos 7 dias
+    // ADVOGADO EXISTENTE: busca ultimos 7 dias
     const seteDiasAtras = new Date(hoje);
     seteDiasAtras.setDate(hoje.getDate() - 7);
     inicio = seteDiasAtras.toISOString().split('T')[0];
@@ -213,6 +206,8 @@ router.get('/buffer', async (req, res) => {
       parteReu: true,
       comarca: true,
       classeProcessual: true,
+      advogadosProcesso: true,
+      nomeOrgao: true,
       status: true,
       createdAt: true,
     },
@@ -261,6 +256,8 @@ router.get('/buffer/processo/:numeroProcesso', async (req, res) => {
       parteReu: true,
       comarca: true,
       classeProcessual: true,
+      advogadosProcesso: true,
+      nomeOrgao: true,
       siglaTribunal: true,
       createdAt: true,
       advogado: {
@@ -282,8 +279,10 @@ router.get('/buffer/processo/:numeroProcesso', async (req, res) => {
       parteReu: p.parteReu,
       comarca: p.comarca,
       classeProcessual: p.classeProcessual,
+      advogadosProcesso: p.advogadosProcesso,
+      nomeOrgao: p.nomeOrgao,
       siglaTribunal: p.siglaTribunal,
-      advogado: p.advogado.nome,
+      advogadoMonitorado: p.advogado.nome,
       criadoEm: p.createdAt,
     })),
   });

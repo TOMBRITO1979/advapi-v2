@@ -4,6 +4,11 @@ import { prisma } from '../utils/prisma.js';
 // URL correta do HComunica CNJ
 const HCOMUNICA_URL = 'https://hcomunica.cnj.jus.br';
 
+interface AdvogadoProcesso {
+  nome: string;
+  oab?: string | null;
+}
+
 interface ProcessoEncontrado {
   numeroProcesso: string;
   siglaTribunal: string;
@@ -16,6 +21,8 @@ interface ProcessoEncontrado {
   parteReu: string | null;
   comarca: string | null;
   classeProcessual: string | null;
+  advogadosProcesso: AdvogadoProcesso[] | null;
+  nomeOrgao: string | null;
 }
 
 interface DadosExtraidos {
@@ -329,6 +336,11 @@ export class ScraperService {
         const textoBruto = item.texto ? item.texto.substring(0, 5000) : null;
         const dadosExtraidos = this.extrairDadosEstruturados(textoBruto);
 
+        // Extrai advogados do processo
+        const advogadosProcesso: AdvogadoProcesso[] | null = item.advogados && item.advogados.length > 0
+          ? item.advogados.map((adv: { nome: string; numeroOab?: string }) => ({ nome: adv.nome, oab: adv.numeroOab || null }))
+          : null;
+
         processos.push({
           numeroProcesso: item.numeroProcesso,
           siglaTribunal: item.siglaTribunal || this.extrairTribunalDoNumero(item.numeroProcesso),
@@ -340,6 +352,8 @@ export class ScraperService {
           parteReu: dadosExtraidos.parteReu,
           comarca: dadosExtraidos.comarca,
           classeProcessual: dadosExtraidos.classeProcessual,
+          advogadosProcesso,
+          nomeOrgao: item.nomeOrgao || null,
         });
       }
     }
@@ -540,6 +554,8 @@ export class ScraperService {
         parteReu: null,
         comarca: null,
         classeProcessual: null,
+        advogadosProcesso: null,
+        nomeOrgao: null,
       };
 
       const idx = html.indexOf(numero);

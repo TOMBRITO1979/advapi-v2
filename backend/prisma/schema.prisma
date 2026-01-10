@@ -80,6 +80,8 @@ model Publicacao {
   parteReu            String?   @db.Text  // REU: Nome(s)
   comarca             String?             // Comarca da Capital, Regional de Bangu, etc
   classeProcessual    String?             // PROCEDIMENTO COMUM CIVEL, EXECUCAO FISCAL, etc
+  advogadosProcesso   Json?               // Lista de advogados do processo [{nome, oab}]
+  nomeOrgao           String?             // Nome do órgão julgador
 
   // Hash para evitar duplicatas
   hashConteudo        String?
