@@ -4,6 +4,7 @@ import { prisma } from '../utils/prisma.js';
 import { scraperService } from '../services/scraper.service.js';
 import { callbackService } from '../services/callback.service.js';
 import { normalizarNumeroProcesso } from '../utils/processo.js';
+import { aplicarRetencaoProcesso } from '../utils/retencao.js';
 
 // Parse Redis URL corretamente (suporta senha)
 function parseRedisUrl(url: string | undefined) {
@@ -111,6 +112,9 @@ const worker = new Worker<ConsultaJob>(
 
           novas++;
           publicacoesNovas.push(publicacao);
+
+          // Aplica politica de retencao: mantem apenas os 3 ultimos andamentos do processo
+          await aplicarRetencaoProcesso(numeroNormalizado);
         }
       }
 
