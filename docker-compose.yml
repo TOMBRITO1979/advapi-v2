@@ -4,12 +4,11 @@ services:
     image: postgres:15-alpine
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-advapi}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-advapi123}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB:-advapi}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    ports:
-      - "5433:5432"
+    # Porta NÃO exposta externamente por segurança
     networks:
       - advapi-network
     healthcheck:
@@ -22,13 +21,13 @@ services:
   # Redis
   redis:
     image: redis:7-alpine
-    command: redis-server --appendonly yes
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
     volumes:
       - redis_data:/data
     networks:
       - advapi-network
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -40,16 +39,16 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-advapi}:${POSTGRES_PASSWORD:-advapi123}@postgres:5432/${POSTGRES_DB:-advapi}
-      REDIS_URL: redis://redis:6379
-      JWT_SECRET: ${JWT_SECRET:-change-this-secret}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-advapi}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-advapi}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      JWT_SECRET: ${JWT_SECRET}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
-      API_KEY: ${API_KEY:-change-this-key}
-      ADVWELL_API_KEY: ${ADVWELL_API_KEY:-change-this-key}
+      API_KEY: ${API_KEY}
+      ADVWELL_API_KEY: ${ADVWELL_API_KEY}
+      CORS_ORIGIN: ${CORS_ORIGIN:-*}
       NODE_ENV: ${NODE_ENV:-production}
       PORT: 3000
-    ports:
-      - "3002:3000"
+    # Porta NÃO exposta externamente - acesso via nginx/frontend
     depends_on:
       postgres:
         condition: service_healthy
@@ -66,9 +65,9 @@ services:
       dockerfile: Dockerfile
     command: ["node", "dist/workers/scraper.worker.js"]
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-advapi}:${POSTGRES_PASSWORD:-advapi123}@postgres:5432/${POSTGRES_DB:-advapi}
-      REDIS_URL: redis://redis:6379
-      ADVWELL_API_KEY: ${ADVWELL_API_KEY:-change-this-key}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-advapi}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-advapi}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      ADVWELL_API_KEY: ${ADVWELL_API_KEY}
       NODE_ENV: ${NODE_ENV:-production}
     depends_on:
       postgres:

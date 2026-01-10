@@ -1,9 +1,26 @@
 import { Queue } from 'bullmq';
 
-const redisConnection = {
-  host: process.env.REDIS_URL?.replace('redis://', '').split(':')[0] || 'localhost',
-  port: parseInt(process.env.REDIS_URL?.split(':')[2] || '6379'),
-};
+// Parse Redis URL corretamente (suporta senha)
+function parseRedisUrl(url: string | undefined) {
+  if (!url) {
+    return { host: 'localhost', port: 6379 };
+  }
+
+  try {
+    // redis://:password@host:port ou redis://host:port
+    const parsed = new URL(url);
+    return {
+      host: parsed.hostname || 'localhost',
+      port: parseInt(parsed.port) || 6379,
+      password: parsed.password || undefined,
+    };
+  } catch {
+    // Fallback para parsing simples
+    return { host: 'localhost', port: 6379 };
+  }
+}
+
+const redisConnection = parseRedisUrl(process.env.REDIS_URL);
 
 // Fila de consultas ao HComunica
 export const consultaQueue = new Queue('consultas', {
