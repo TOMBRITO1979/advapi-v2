@@ -796,31 +796,41 @@ export class ScraperService {
   private limparTextoCompleto(texto: string): string {
     return texto
       // Remove scripts e styles
-      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, ' ')
       // Remove tags HTML
       .replace(/<\/?[a-z][^>]*>/gi, ' ')
       .replace(/<[^>]+>/g, ' ')
-      // Remove atributos Angular/Material
-      .replace(/_ngcontent[^=]*="[^"]*"/gi, ' ')
-      .replace(/_ngcontent[^\s>]*/gi, ' ')
-      .replace(/\b(ng|mat|cdk|aria|tabindex|class|id|role|style|href|src)\w*="[^"]*"/gi, ' ')
-      .replace(/\b(ng|mat|cdk|aria)[a-z-]*(?=\s|>|$)/gi, ' ')
+      // Remove atributos HTML com valores
+      .replace(/\w+="[^"]*"/g, ' ')
+      .replace(/="[^"]*"/g, ' ')
+      .replace(/="\w*/g, ' ')
+      // Remove classes CSS (col-md-1, etc)
+      .replace(/\b[a-z]+-[a-z]+-\d+\b/gi, ' ')
+      .replace(/\bcol-\w+/gi, ' ')
+      // Remove fragmentos Angular/data attributes
+      .replace(/_ng[\w-]*/gi, ' ')
+      .replace(/content-[\w-]+/gi, ' ')
+      .replace(/\bdata-[\w-]*/gi, ' ')
+      .replace(/\bt-icon\b/gi, ' ')
+      .replace(/\b_[a-z]\b/gi, ' ')
+      // Remove palavras Angular/Material
+      .replace(/\b(ng|mat|cdk|aria|tyx)[\w-]*/gi, ' ')
+      .replace(/\b(tabindex|class|id|role|style|href|src)\b/gi, ' ')
       .replace(/mattablabelwrapper/gi, ' ')
-      .replace(/mat-ripple/gi, ' ')
       .replace(/cdkmonitorelementfocus/gi, ' ')
       // Remove entidades HTML
       .replace(/&nbsp;/g, ' ')
       .replace(/&amp;/g, '&')
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
-      .replace(/&quot;/g, '"')
-      .replace(/&#\d+;/g, ' ')
-      // Remove caracteres especiais desnecessarios
-      .replace(/[{}[\]|\\<>]/g, ' ')
-      // Remove nomes de tags soltas
-      .replace(/\b(div|span|button|input|label|form|table|tr|td|th|ul|li|ol|img|a|p|h[1-6]|br|hr)\b(?!\s+[A-Z])/gi, ' ')
-      .replace(/\biv\b/gi, ' ')
+      .replace(/&[a-z]+;/gi, ' ')
+      // Remove caracteres especiais
+      .replace(/[<>{}[\]|\\="]/g, ' ')
+      // Remove tags HTML soltas
+      .replace(/\b(div|span|button|input|label|form|table|tr|td|th|ul|li|ol|img|br|hr|iv)\b/gi, ' ')
+      // Remove palavras de interface
+      .replace(/\b(Imprimir|Copiar sem formatação|Copiar)\b/gi, ' ')
+      // Remove SIGLA numero antes de Processo
+      .replace(/([A-Z]{2,5}\d*)\s+\d+\s+(Processo)/gi, '$1 $2')
       // Normaliza espacos
       .replace(/\s+/g, ' ')
       .trim();
