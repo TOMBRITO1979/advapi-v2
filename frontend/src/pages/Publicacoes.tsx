@@ -10,6 +10,7 @@ interface Publicacao {
   dataPublicacao: string | null;
   tipoComunicacao: string | null;
   textoComunicacao: string | null;
+  textoLimpo: string | null;
   status: string;
   enviadoAdvwell: boolean;
   advogado: {
@@ -267,11 +268,11 @@ export default function Publicacoes() {
                 <dt className="font-medium text-gray-500">Advogado</dt>
                 <dd className="text-gray-900">{selected.advogado.nome}</dd>
               </div>
-              {selected.textoComunicacao && (
+              {(selected.textoLimpo || selected.textoComunicacao) && (
                 <div className="py-3">
                   <dt className="font-medium text-gray-500 mb-2">Texto</dt>
-                  <dd className="text-gray-900 text-sm bg-gray-50 p-3 rounded">
-                    {selected.textoComunicacao}
+                  <dd className="text-gray-900 text-sm bg-gray-50 p-3 rounded whitespace-pre-wrap max-h-60 overflow-y-auto">
+                    {selected.textoLimpo || selected.textoComunicacao}
                   </dd>
                 </div>
               )}
