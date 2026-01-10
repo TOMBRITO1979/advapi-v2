@@ -3,6 +3,7 @@ import { prisma } from '../utils/prisma.js';
 import { adicionarConsulta, getQueueStatus } from '../utils/queue.js';
 import { apiKeyMiddleware } from '../middlewares/auth.js';
 import { AppError } from '../middlewares/error.js';
+import { normalizarNumeroProcesso } from '../utils/processo.js';
 
 const router = Router();
 
@@ -236,10 +237,13 @@ router.get('/buffer/processo/:numeroProcesso', async (req, res) => {
   const { numeroProcesso } = req.params;
   const { companyId } = req.query;
 
+  // Normaliza numero do processo (remove . e -)
+  const numeroNormalizado = normalizarNumeroProcesso(numeroProcesso);
+
   // Busca publicacoes do processo
   const publicacoes = await prisma.publicacao.findMany({
     where: {
-      numeroProcesso,
+      numeroProcesso: numeroNormalizado,
       ...(companyId && {
         advogado: { advwellCompanyId: String(companyId) },
       }),
@@ -267,7 +271,7 @@ router.get('/buffer/processo/:numeroProcesso', async (req, res) => {
   });
 
   res.json({
-    numeroProcesso,
+    numeroProcesso: numeroNormalizado,
     totalAndamentos: publicacoes.length,
     andamentos: publicacoes.map((p) => ({
       id: p.id,

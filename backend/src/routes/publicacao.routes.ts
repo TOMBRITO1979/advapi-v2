@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { prisma } from '../utils/prisma.js';
 import { authMiddleware, AuthRequest } from '../middlewares/auth.js';
 import { AppError } from '../middlewares/error.js';
+import { normalizarNumeroProcesso } from '../utils/processo.js';
 
 const router = Router();
 
@@ -39,8 +40,10 @@ router.get('/', async (req: AuthRequest, res) => {
   }
 
   if (busca) {
+    // Normaliza busca se parece ser numero de processo
+    const buscaNormalizada = normalizarNumeroProcesso(String(busca));
     where.OR = [
-      { numeroProcesso: { contains: String(busca), mode: 'insensitive' } },
+      { numeroProcesso: { contains: buscaNormalizada, mode: 'insensitive' } },
       { textoComunicacao: { contains: String(busca), mode: 'insensitive' } },
     ];
   }

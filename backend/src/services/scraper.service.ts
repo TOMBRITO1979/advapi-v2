@@ -1,5 +1,6 @@
 import { chromium, Browser, Page, Response } from 'playwright';
 import { prisma } from '../utils/prisma.js';
+import { normalizarNumeroProcesso } from '../utils/processo.js';
 
 // URL correta do HComunica CNJ
 const HCOMUNICA_URL = 'https://hcomunica.cnj.jus.br';
@@ -345,7 +346,7 @@ export class ScraperService {
         const nomeOrgao = item.nomeOrgao || dadosExtraidos.nomeOrgao || null;
 
         processos.push({
-          numeroProcesso: item.numeroProcesso,
+          numeroProcesso: normalizarNumeroProcesso(item.numeroProcesso),
           siglaTribunal: item.siglaTribunal || this.extrairTribunalDoNumero(item.numeroProcesso),
           dataPublicacao: item.dataDisponibilizacao ? item.dataDisponibilizacao.split('T')[0] : null,
           tipoComunicacao: item.tipoComunicacao || item.textoCategoria || null,
@@ -419,13 +420,14 @@ export class ScraperService {
   }
 
   /**
-   * Remove processos duplicados
+   * Remove processos duplicados (compara numeros normalizados)
    */
   private removerDuplicados(processos: ProcessoEncontrado[]): ProcessoEncontrado[] {
     const vistos = new Set<string>();
     return processos.filter(p => {
-      if (vistos.has(p.numeroProcesso)) return false;
-      vistos.add(p.numeroProcesso);
+      const numNormalizado = normalizarNumeroProcesso(p.numeroProcesso);
+      if (vistos.has(numNormalizado)) return false;
+      vistos.add(numNormalizado);
       return true;
     });
   }
@@ -547,7 +549,7 @@ export class ScraperService {
 
     for (const numero of processosUnicos) {
       const pub: ProcessoEncontrado = {
-        numeroProcesso: numero,
+        numeroProcesso: normalizarNumeroProcesso(numero),
         siglaTribunal: this.extrairTribunalDoNumero(numero),
         dataPublicacao: null,
         tipoComunicacao: null,

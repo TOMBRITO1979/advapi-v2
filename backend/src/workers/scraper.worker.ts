@@ -3,6 +3,7 @@ import { Worker, Job } from 'bullmq';
 import { prisma } from '../utils/prisma.js';
 import { scraperService } from '../services/scraper.service.js';
 import { callbackService } from '../services/callback.service.js';
+import { normalizarNumeroProcesso } from '../utils/processo.js';
 
 // Parse Redis URL corretamente (suporta senha)
 function parseRedisUrl(url: string | undefined) {
@@ -75,11 +76,14 @@ const worker = new Worker<ConsultaJob>(
       const publicacoesNovas = [];
 
       for (const processo of processos) {
+        // Normaliza numero do processo (remove . e -)
+        const numeroNormalizado = normalizarNumeroProcesso(processo.numeroProcesso);
+
         // Verifica se ja existe
         const existe = await prisma.publicacao.findFirst({
           where: {
             advogadoId,
-            numeroProcesso: processo.numeroProcesso,
+            numeroProcesso: numeroNormalizado,
           },
         });
 
@@ -87,7 +91,7 @@ const worker = new Worker<ConsultaJob>(
           const publicacao = await prisma.publicacao.create({
             data: {
               advogadoId,
-              numeroProcesso: processo.numeroProcesso,
+              numeroProcesso: numeroNormalizado,
               siglaTribunal: processo.siglaTribunal,
               dataPublicacao: processo.dataPublicacao
                 ? new Date(processo.dataPublicacao.split('/').reverse().join('-'))
