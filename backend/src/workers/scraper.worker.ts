@@ -204,8 +204,10 @@ worker.on('error', (error) => {
 
 // Configuracao de horario de funcionamento
 const HORARIO_CONFIG = {
-  horaInicio: 7,   // 7h da manha
-  horaFim: 21,     // 21h (9pm)
+  horaInicio: 6,       // 6h da manha
+  minutoInicio: 10,    // 10 minutos (inicia 6:10)
+  horaFim: 21,         // 21h (9pm)
+  minutoFim: 0,        // 0 minutos (termina 21:00)
   diasSemana: [1, 2, 3, 4, 5, 6], // Segunda(1) a Sabado(6) - Domingo(0) nao roda
   fusoHorario: 'America/Sao_Paulo',
 };
@@ -216,7 +218,7 @@ const DELAY_MAX_MS = 120 * 1000; // 2 minutos
 
 /**
  * Verifica se esta dentro do horario de funcionamento
- * Segunda a Sabado, das 7h as 21h (horario de Brasilia)
+ * Segunda a Sabado, das 6:10 as 21:00 (horario de Brasilia)
  */
 function dentroDoHorarioFuncionamento(): boolean {
   const agora = new Date();
@@ -224,9 +226,15 @@ function dentroDoHorarioFuncionamento(): boolean {
   // Converte para horario de Brasilia
   const horaBrasilia = new Date(agora.toLocaleString('en-US', { timeZone: HORARIO_CONFIG.fusoHorario }));
   const hora = horaBrasilia.getHours();
+  const minuto = horaBrasilia.getMinutes();
   const diaSemana = horaBrasilia.getDay(); // 0=Domingo, 1=Segunda, ..., 6=Sabado
 
-  const dentroDoHorario = hora >= HORARIO_CONFIG.horaInicio && hora < HORARIO_CONFIG.horaFim;
+  // Converte para minutos do dia para comparacao mais facil
+  const minutosAgora = hora * 60 + minuto;
+  const minutosInicio = HORARIO_CONFIG.horaInicio * 60 + HORARIO_CONFIG.minutoInicio;
+  const minutosFim = HORARIO_CONFIG.horaFim * 60 + HORARIO_CONFIG.minutoFim;
+
+  const dentroDoHorario = minutosAgora >= minutosInicio && minutosAgora < minutosFim;
   const diaPermitido = HORARIO_CONFIG.diasSemana.includes(diaSemana);
 
   return dentroDoHorario && diaPermitido;
