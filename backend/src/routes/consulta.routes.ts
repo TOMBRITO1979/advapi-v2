@@ -79,9 +79,9 @@ router.post('/', async (req, res) => {
     inicio = dataInicio;
     tipoBusca = 'PERSONALIZADA';
   } else if (isNovoAdvogado) {
-    // NOVO ADVOGADO: busca ultimos 3 anos (historico completo)
-    inicio = new Date(hoje.getFullYear() - 3, hoje.getMonth(), hoje.getDate()).toISOString().split('T')[0];
-    tipoBusca = 'HISTORICO_3_ANOS';
+    // NOVO ADVOGADO: busca ultimos 5 anos (historico completo)
+    inicio = new Date(hoje.getFullYear() - 5, hoje.getMonth(), hoje.getDate()).toISOString().split('T')[0];
+    tipoBusca = 'HISTORICO_5_ANOS';
   } else {
     // ADVOGADO EXISTENTE: busca ultimos 7 dias
     const seteDiasAtras = new Date(hoje);

@@ -214,9 +214,9 @@ router.post('/:id/consultar', async (req: AuthRequest, res) => {
     inicio = dataInicio;
     tipoBusca = 'PERSONALIZADA';
   } else if (forcarHistorico || !advogado.ultimaConsulta) {
-    // PRIMEIRA CONSULTA ou forcado: busca ultimos 3 anos
-    inicio = new Date(hoje.getFullYear() - 3, hoje.getMonth(), hoje.getDate()).toISOString().split('T')[0];
-    tipoBusca = 'HISTORICO_3_ANOS';
+    // PRIMEIRA CONSULTA ou forcado: busca ultimos 5 anos
+    inicio = new Date(hoje.getFullYear() - 5, hoje.getMonth(), hoje.getDate()).toISOString().split('T')[0];
+    tipoBusca = 'HISTORICO_5_ANOS';
   } else {
     // JA FOI CONSULTADO: busca ultimos 7 dias
     const seteDiasAtras = new Date(hoje);

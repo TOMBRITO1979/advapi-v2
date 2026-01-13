@@ -190,10 +190,10 @@ const worker = new Worker<ConsultaJob>(
   },
   {
     connection: redisConnection,
-    concurrency: 2, // Processa 2 jobs simultaneamente
+    concurrency: 3, // Processa 3 jobs simultaneamente por worker
     limiter: {
-      max: 10,
-      duration: 60000, // Max 10 por minuto
+      max: 5,
+      duration: 60000, // Max 5 por minuto (conservador para CNJ)
     },
   }
 );
@@ -319,8 +319,8 @@ async function agendarConsultasAutomaticas(): Promise<void> {
       dataInicio.setDate(dataInicio.getDate() - 7);
       inicio = dataInicio.toISOString().split('T')[0];
     } else {
-      // Primeira sincronizacao: busca ultimos 3 anos
-      inicio = new Date(hoje.getFullYear() - 3, hoje.getMonth(), hoje.getDate())
+      // Primeira sincronizacao: busca ultimos 5 anos
+      inicio = new Date(hoje.getFullYear() - 5, hoje.getMonth(), hoje.getDate())
         .toISOString()
         .split('T')[0];
     }
