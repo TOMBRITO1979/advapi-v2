@@ -88,9 +88,11 @@ router.get('/:id', async (req: AuthRequest, res) => {
 /**
  * POST /api/advogados
  * Cadastra novo advogado para monitoramento
+ * Enfileira automaticamente a primeira consulta (historico 5 anos)
  */
 router.post('/', async (req: AuthRequest, res) => {
   const { nome, oab, ufOab, advwellCompanyId, tribunais, callbackUrl } = req.body;
+  const { adicionarConsulta } = await import('../utils/queue.js');
 
   if (!nome) {
     throw new AppError('Nome e obrigatorio', 400);
@@ -120,7 +122,39 @@ router.post('/', async (req: AuthRequest, res) => {
     },
   });
 
-  res.status(201).json(advogado);
+  // Enfileira automaticamente a primeira consulta (historico 5 anos)
+  const hoje = new Date();
+  const fim = hoje.toISOString().split('T')[0];
+  const inicio = new Date(hoje.getFullYear() - 5, hoje.getMonth(), hoje.getDate()).toISOString().split('T')[0];
+
+  const consulta = await prisma.consulta.create({
+    data: {
+      advogadoId: advogado.id,
+      dataInicio: new Date(inicio),
+      dataFim: new Date(fim),
+      status: 'PENDENTE',
+    },
+  });
+
+  const jobId = await adicionarConsulta({
+    advogadoId: advogado.id,
+    nome: advogado.nome,
+    dataInicio: inicio,
+    dataFim: fim,
+    prioridade: 2, // Prioridade alta para execucao imediata
+  });
+
+  console.log(`[Cadastro] Advogado ${advogado.nome} cadastrado e enfileirado | Job: ${jobId} | Periodo: ${inicio} a ${fim}`);
+
+  res.status(201).json({
+    ...advogado,
+    consultaInicial: {
+      consultaId: consulta.id,
+      jobId,
+      tipoBusca: 'HISTORICO_5_ANOS',
+      periodo: { inicio, fim },
+    },
+  });
 });
 
 /**
