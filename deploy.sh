@@ -22,7 +22,7 @@ docker build -t advapi-frontend:latest ./frontend
 echo ""
 echo "[2/4] Running database migrations..."
 docker run --rm \
-  --network advapi-network \
+  --network advapi_advapi_internal \
   -e DATABASE_URL=postgresql://advapi:advapi123@postgres:5432/advapi \
   advapi-backend:latest \
   npx prisma migrate deploy

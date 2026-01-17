@@ -26,9 +26,9 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-# Copia package.json e instala dependencias
+# Copia package.json e instala dependencias (incluindo devDependencies para build)
 COPY package*.json ./
-RUN npm ci --only=production
+RUN npm ci
 
 # Copia codigo fonte
 COPY . .

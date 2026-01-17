@@ -410,7 +410,7 @@ router.get('/workers', async (req: AuthRequest, res) => {
 
   // Configuracao de horario (deve bater com o worker)
   const HORARIO_CONFIG = {
-    horaInicio: 7,
+    horaInicio: 6,
     horaFim: 21,
     diasSemana: [1, 2, 3, 4, 5, 6],
   };
