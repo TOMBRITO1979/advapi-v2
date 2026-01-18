@@ -83,11 +83,9 @@ router.post('/', async (req, res) => {
     inicio = new Date(hoje.getFullYear() - 5, hoje.getMonth(), hoje.getDate()).toISOString().split('T')[0];
     tipoBusca = 'HISTORICO_5_ANOS';
   } else {
-    // ADVOGADO EXISTENTE: busca ultimos 7 dias
-    const seteDiasAtras = new Date(hoje);
-    seteDiasAtras.setDate(hoje.getDate() - 7);
-    inicio = seteDiasAtras.toISOString().split('T')[0];
-    tipoBusca = 'ATUALIZACAO_7D';
+    // ADVOGADO EXISTENTE: busca ultimos 5 anos (historico completo)
+    inicio = new Date(hoje.getFullYear() - 5, hoje.getMonth(), hoje.getDate()).toISOString().split('T')[0];
+    tipoBusca = 'HISTORICO_5_ANOS';
   }
 
   console.log(`[Consulta] Advogado: ${advogado.nome} | Tipo: ${tipoBusca} | Periodo: ${inicio} a ${fim}`);

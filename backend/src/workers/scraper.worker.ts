@@ -311,19 +311,10 @@ async function agendarConsultasAutomaticas(): Promise<void> {
     const hoje = new Date();
     const fim = hoje.toISOString().split('T')[0];
 
-    // Define periodo baseado se ja foi sincronizado antes
-    let inicio: string;
-    if (advogado.ultimaSincronizacao) {
-      // Ja foi sincronizado: busca ultimos 7 dias
-      const dataInicio = new Date(hoje);
-      dataInicio.setDate(dataInicio.getDate() - 7);
-      inicio = dataInicio.toISOString().split('T')[0];
-    } else {
-      // Primeira sincronizacao: busca ultimos 5 anos
-      inicio = new Date(hoje.getFullYear() - 5, hoje.getMonth(), hoje.getDate())
-        .toISOString()
-        .split('T')[0];
-    }
+    // Define periodo: sempre busca ultimos 5 anos
+    const inicio = new Date(hoje.getFullYear() - 5, hoje.getMonth(), hoje.getDate())
+      .toISOString()
+      .split('T')[0];
 
     // Cria consulta
     await prisma.consulta.create({
