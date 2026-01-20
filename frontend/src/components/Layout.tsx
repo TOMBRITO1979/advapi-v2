@@ -51,11 +51,11 @@ export default function Layout({ children }: { children: ReactNode }) {
 
       {/* Sidebar */}
       <aside
-        className={`fixed top-0 left-0 z-30 h-full w-64 bg-gray-900 transform transition-transform lg:translate-x-0 ${
+        className={`fixed top-0 left-0 z-30 h-full w-64 bg-gray-900 transform transition-transform lg:translate-x-0 flex flex-col ${
           sidebarOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
-        <div className="flex items-center justify-between h-16 px-4 border-b border-gray-800">
+        <div className="flex items-center justify-between h-16 px-4 border-b border-gray-800 flex-shrink-0">
           <h1 className="text-xl font-bold text-white">ADVAPI</h1>
           <button
             className="lg:hidden text-gray-400 hover:text-white"
@@ -65,7 +65,7 @@ export default function Layout({ children }: { children: ReactNode }) {
           </button>
         </div>
 
-        <nav className="mt-4">
+        <nav className="flex-1 overflow-y-auto py-4">
           {menuItems.map((item) => {
             const Icon = item.icon;
             const isActive = location.pathname === item.path;
@@ -88,7 +88,7 @@ export default function Layout({ children }: { children: ReactNode }) {
           })}
         </nav>
 
-        <div className="absolute bottom-0 left-0 right-0 p-4 border-t border-gray-800">
+        <div className="flex-shrink-0 p-4 border-t border-gray-800">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-white">{usuario?.nome}</p>
