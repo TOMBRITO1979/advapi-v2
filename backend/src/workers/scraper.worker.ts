@@ -390,6 +390,315 @@ setInterval(resetarContadoresProxy, 60 * 60 * 1000);
 // Reset inicial ao iniciar (garante distribuicao desde o inicio)
 setTimeout(resetarContadoresProxy, 5000);
 
+// ============================================================================
+// HEALTH CHECK DE PROXIES (2x ao dia - 8h e 20h)
+// ============================================================================
+
+const HEALTH_CHECK_HORAS = [8, 20]; // Horarios de health check (Brasilia)
+let ultimoHealthCheckHora: number | null = null; // Evita executar mais de 1x na mesma hora
+
+/**
+ * Testa conectividade basica do proxy via ipify.org
+ */
+async function testarConectividadeProxy(proxy: { host: string; porta: number; usuario?: string | null; senha?: string | null; protocolo: string }): Promise<{ ok: boolean; erro?: string }> {
+  try {
+    const { chromium } = await import('playwright');
+    const browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] });
+
+    const contextOptions: any = {
+      proxy: {
+        server: `${proxy.protocolo}://${proxy.host}:${proxy.porta}`,
+        username: proxy.usuario || undefined,
+        password: proxy.senha || undefined,
+      },
+    };
+
+    const context = await browser.newContext(contextOptions);
+    const page = await context.newPage();
+
+    // Timeout de 30 segundos para teste
+    await page.goto('https://api.ipify.org?format=json', { timeout: 30000 });
+    const conteudo = await page.content();
+
+    await context.close();
+    await browser.close();
+
+    if (conteudo.includes('ip')) {
+      return { ok: true };
+    }
+    return { ok: false, erro: 'Resposta invalida do ipify' };
+  } catch (error: any) {
+    return { ok: false, erro: error.message };
+  }
+}
+
+/**
+ * Testa acesso ao HComunica CNJ e detecta bloqueio
+ */
+async function testarAcessoCnj(proxy: { host: string; porta: number; usuario?: string | null; senha?: string | null; protocolo: string }): Promise<{ ok: boolean; bloqueadoCnj: boolean; motivo?: string }> {
+  try {
+    const { chromium } = await import('playwright');
+    const browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] });
+
+    const contextOptions: any = {
+      proxy: {
+        server: `${proxy.protocolo}://${proxy.host}:${proxy.porta}`,
+        username: proxy.usuario || undefined,
+        password: proxy.senha || undefined,
+      },
+      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    };
+
+    const context = await browser.newContext(contextOptions);
+    const page = await context.newPage();
+
+    // Tenta acessar o HComunica
+    const response = await page.goto('https://hcomunica.cnj.jus.br', { timeout: 60000 });
+    const conteudo = await page.content();
+    const statusCode = response?.status() || 0;
+
+    await context.close();
+    await browser.close();
+
+    // Detecta sinais de bloqueio
+    const sinaisBloqueio = [
+      'acesso negado',
+      'ip bloqueado',
+      'muitas requisições',
+      'muitas requisicoes',
+      'tente novamente mais tarde',
+      'rate limit',
+      'too many requests',
+      'access denied',
+      'blocked',
+    ];
+
+    const conteudoLower = conteudo.toLowerCase();
+    for (const sinal of sinaisBloqueio) {
+      if (conteudoLower.includes(sinal)) {
+        return { ok: false, bloqueadoCnj: true, motivo: sinal };
+      }
+    }
+
+    // Verifica status HTTP
+    if (statusCode === 403 || statusCode === 429) {
+      return { ok: false, bloqueadoCnj: true, motivo: `HTTP ${statusCode}` };
+    }
+
+    if (statusCode >= 500) {
+      return { ok: false, bloqueadoCnj: false, motivo: `Erro servidor: HTTP ${statusCode}` };
+    }
+
+    // Verifica se a pagina carregou corretamente (deve ter o titulo do HComunica)
+    if (conteudoLower.includes('hcomunica') || conteudoLower.includes('consulta pública')) {
+      return { ok: true, bloqueadoCnj: false };
+    }
+
+    // Se chegou aqui, pode ser captcha ou outro problema
+    if (conteudoLower.includes('captcha') || conteudoLower.includes('recaptcha')) {
+      return { ok: false, bloqueadoCnj: true, motivo: 'CAPTCHA detectado' };
+    }
+
+    return { ok: true, bloqueadoCnj: false };
+  } catch (error: any) {
+    const mensagem = error.message || '';
+    const isBloqueio = mensagem.includes('403') || mensagem.includes('blocked') || mensagem.includes('rate limit');
+    return { ok: false, bloqueadoCnj: isBloqueio, motivo: mensagem };
+  }
+}
+
+/**
+ * Executa health check completo em um proxy
+ */
+async function executarHealthCheckProxy(proxyId: string): Promise<void> {
+  const proxy = await prisma.proxy.findUnique({ where: { id: proxyId } });
+  if (!proxy) return;
+
+  console.log(`[HealthCheck] Testando proxy: ${proxy.host}:${proxy.porta}`);
+
+  // Teste 1: Conectividade basica
+  const conectividade = await testarConectividadeProxy(proxy);
+
+  if (!conectividade.ok) {
+    console.log(`[HealthCheck] Proxy ${proxy.host}:${proxy.porta} - FALHA conectividade: ${conectividade.erro}`);
+
+    await prisma.proxy.update({
+      where: { id: proxyId },
+      data: {
+        ultimoHealthCheck: new Date(),
+        funcionando: false,
+        falhasConsecutivas: proxy.falhasConsecutivas + 1,
+        necessitaSubstituicao: proxy.falhasConsecutivas + 1 >= 5,
+        ultimoErro: conectividade.erro,
+      },
+    });
+    return;
+  }
+
+  // Teste 2: Acesso ao CNJ
+  const acessoCnj = await testarAcessoCnj(proxy);
+
+  if (!acessoCnj.ok) {
+    console.log(`[HealthCheck] Proxy ${proxy.host}:${proxy.porta} - FALHA CNJ: ${acessoCnj.motivo} (bloqueado: ${acessoCnj.bloqueadoCnj})`);
+
+    await prisma.proxy.update({
+      where: { id: proxyId },
+      data: {
+        ultimoHealthCheck: new Date(),
+        funcionando: !acessoCnj.bloqueadoCnj, // Se bloqueado CNJ, marca como nao funcionando
+        bloqueadoCnj: acessoCnj.bloqueadoCnj,
+        dataBloqueioCnj: acessoCnj.bloqueadoCnj ? new Date() : proxy.dataBloqueioCnj,
+        falhasConsecutivas: proxy.falhasConsecutivas + 1,
+        necessitaSubstituicao: acessoCnj.bloqueadoCnj || proxy.falhasConsecutivas + 1 >= 5,
+        ultimoErro: acessoCnj.motivo,
+      },
+    });
+    return;
+  }
+
+  // Proxy OK - reseta contadores
+  console.log(`[HealthCheck] Proxy ${proxy.host}:${proxy.porta} - OK`);
+
+  await prisma.proxy.update({
+    where: { id: proxyId },
+    data: {
+      ultimoHealthCheck: new Date(),
+      funcionando: true,
+      bloqueadoCnj: false,
+      falhasConsecutivas: 0,
+      necessitaSubstituicao: false,
+      ultimoErro: null,
+    },
+  });
+}
+
+/**
+ * Gera alertas para proxies problematicos
+ */
+async function gerarAlertasProxies(): Promise<void> {
+  // Busca proxies que precisam substituicao
+  const problematicos = await prisma.proxy.findMany({
+    where: {
+      ativo: true,
+      OR: [
+        { bloqueadoCnj: true },
+        { necessitaSubstituicao: true },
+        { falhasConsecutivas: { gte: 3 } },
+      ],
+    },
+  });
+
+  if (problematicos.length === 0) {
+    console.log('[HealthCheck] Nenhum proxy problematico encontrado');
+    return;
+  }
+
+  // Separa por criticidade
+  const bloqueadosCnj = problematicos.filter(p => p.bloqueadoCnj);
+  const comMuitasFalhas = problematicos.filter(p => !p.bloqueadoCnj && p.falhasConsecutivas >= 5);
+  const comAlgumasFalhas = problematicos.filter(p => !p.bloqueadoCnj && p.falhasConsecutivas >= 3 && p.falhasConsecutivas < 5);
+
+  // Alerta CRITICO para bloqueados CNJ
+  if (bloqueadosCnj.length > 0) {
+    await prisma.logSistema.create({
+      data: {
+        tipo: 'CRITICO',
+        categoria: 'PROXY',
+        titulo: `${bloqueadosCnj.length} proxy(s) bloqueado(s) pelo CNJ`,
+        mensagem: `Os seguintes proxies foram bloqueados pelo CNJ e precisam ser substituidos URGENTEMENTE:\n\n${bloqueadosCnj.map(p => `- ${p.host}:${p.porta} (bloqueado em ${p.dataBloqueioCnj?.toLocaleString('pt-BR') || 'N/A'})`).join('\n')}`,
+      },
+    });
+    console.log(`[HealthCheck] Alerta CRITICO: ${bloqueadosCnj.length} proxies bloqueados pelo CNJ`);
+  }
+
+  // Alerta ERRO para muitas falhas
+  if (comMuitasFalhas.length > 0) {
+    await prisma.logSistema.create({
+      data: {
+        tipo: 'ERRO',
+        categoria: 'PROXY',
+        titulo: `${comMuitasFalhas.length} proxy(s) com muitas falhas`,
+        mensagem: `Os seguintes proxies tiveram 5+ falhas consecutivas e precisam ser verificados:\n\n${comMuitasFalhas.map(p => `- ${p.host}:${p.porta} (${p.falhasConsecutivas} falhas) - ${p.ultimoErro || 'Sem detalhes'}`).join('\n')}`,
+      },
+    });
+    console.log(`[HealthCheck] Alerta ERRO: ${comMuitasFalhas.length} proxies com muitas falhas`);
+  }
+
+  // Alerta WARNING para algumas falhas
+  if (comAlgumasFalhas.length > 0) {
+    await prisma.logSistema.create({
+      data: {
+        tipo: 'ALERTA',
+        categoria: 'PROXY',
+        titulo: `${comAlgumasFalhas.length} proxy(s) com falhas intermitentes`,
+        mensagem: `Os seguintes proxies tiveram 3+ falhas consecutivas e devem ser monitorados:\n\n${comAlgumasFalhas.map(p => `- ${p.host}:${p.porta} (${p.falhasConsecutivas} falhas)`).join('\n')}`,
+      },
+    });
+    console.log(`[HealthCheck] Alerta WARNING: ${comAlgumasFalhas.length} proxies com falhas intermitentes`);
+  }
+}
+
+/**
+ * Executa health check de todos os proxies ativos (roda 2x ao dia)
+ */
+async function executarHealthCheckProxies(): Promise<void> {
+  const agora = new Date();
+  const horaBrasilia = new Date(agora.toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }));
+  const hora = horaBrasilia.getHours();
+
+  // Verifica se esta nas horas configuradas
+  if (!HEALTH_CHECK_HORAS.includes(hora)) {
+    return;
+  }
+
+  // Evita executar mais de 1x na mesma hora
+  if (ultimoHealthCheckHora === hora) {
+    return;
+  }
+
+  console.log(`\n[HealthCheck] ========================================`);
+  console.log(`[HealthCheck] Iniciando health check de proxies (${horaBrasilia.toLocaleString('pt-BR')})`);
+  console.log(`[HealthCheck] ========================================`);
+
+  ultimoHealthCheckHora = hora;
+
+  // Busca proxies ativos
+  const proxies = await prisma.proxy.findMany({
+    where: { ativo: true },
+    orderBy: { ultimoHealthCheck: 'asc' }, // Prioriza quem nao foi testado ha mais tempo
+  });
+
+  console.log(`[HealthCheck] ${proxies.length} proxies para testar`);
+
+  // Testa cada proxy sequencialmente (evita sobrecarregar)
+  for (let i = 0; i < proxies.length; i++) {
+    const proxy = proxies[i];
+    console.log(`[HealthCheck] Testando ${i + 1}/${proxies.length}: ${proxy.host}:${proxy.porta}`);
+
+    await executarHealthCheckProxy(proxy.id);
+
+    // Delay entre testes (5-10s)
+    if (i < proxies.length - 1) {
+      const delay = 5000 + Math.random() * 5000;
+      await new Promise(r => setTimeout(r, delay));
+    }
+  }
+
+  console.log(`[HealthCheck] Testes concluidos, gerando alertas...`);
+
+  // Gera alertas apos todos os testes
+  await gerarAlertasProxies();
+
+  console.log(`[HealthCheck] Health check finalizado`);
+  console.log(`[HealthCheck] ========================================\n`);
+}
+
+// Executa verificacao de health check a cada hora (verifica se esta nas horas configuradas)
+setInterval(executarHealthCheckProxies, 60 * 60 * 1000);
+
+// Executa verificacao inicial apos 30 segundos
+setTimeout(executarHealthCheckProxies, 30000);
+
 // Graceful shutdown
 process.on('SIGTERM', async () => {
   console.log('\n[Worker] Finalizando...');

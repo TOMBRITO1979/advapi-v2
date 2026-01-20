@@ -199,6 +199,13 @@ model Proxy {
   consultasHoraAtual Int       @default(0)
   horaAtualInicio DateTime?
 
+  // Health check
+  ultimoHealthCheck     DateTime?
+  falhasConsecutivas    Int       @default(0)
+  bloqueadoCnj          Boolean   @default(false)
+  dataBloqueioCnj       DateTime?
+  necessitaSubstituicao Boolean   @default(false)
+
   // Metadados
   nome            String?      // Nome amigavel
   provedor        String?      // Webshare, BrightData, etc

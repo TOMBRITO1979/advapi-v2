@@ -149,25 +149,81 @@ export class ScraperService {
     });
 
     if (proxyDb) {
+      // Detecta se e bloqueio do CNJ
+      const { bloqueado, motivo } = this.detectarBloqueioCnjNoErro(erro || '');
+
       await prisma.proxy.update({
         where: { id: proxyDb.id },
         data: {
           consultasFalha: { increment: 1 },
           funcionando: false,
           ultimoErro: erro || 'Falha na conexao',
+          falhasConsecutivas: { increment: 1 },
+          bloqueadoCnj: bloqueado,
+          dataBloqueioCnj: bloqueado ? new Date() : proxyDb.dataBloqueioCnj,
+          necessitaSubstituicao: bloqueado || proxyDb.falhasConsecutivas + 1 >= 5,
         },
       });
 
       // Registra log do sistema
+      const tipo = bloqueado ? 'CRITICO' : 'ERRO';
       await prisma.logSistema.create({
         data: {
-          tipo: 'ERRO',
+          tipo,
           categoria: 'PROXY',
-          titulo: `Proxy falhou: ${proxy.host}:${proxy.porta}`,
-          mensagem: erro || 'O proxy parou de funcionar e foi desativado automaticamente.',
+          titulo: bloqueado
+            ? `Proxy BLOQUEADO pelo CNJ: ${proxy.host}:${proxy.porta}`
+            : `Proxy falhou: ${proxy.host}:${proxy.porta}`,
+          mensagem: bloqueado
+            ? `O proxy foi bloqueado pelo CNJ (${motivo}) e precisa ser substituido URGENTEMENTE.`
+            : (erro || 'O proxy parou de funcionar e foi desativado automaticamente.'),
           proxyId: proxyDb.id,
         },
       });
+    }
+  }
+
+  /**
+   * Detecta sinais de bloqueio do CNJ em mensagens de erro ou conteudo de pagina
+   */
+  private detectarBloqueioCnjNoErro(mensagem: string): { bloqueado: boolean; motivo: string } {
+    const mensagemLower = mensagem.toLowerCase();
+
+    const sinaisBloqueio = [
+      { texto: 'acesso negado', motivo: 'Acesso negado' },
+      { texto: 'ip bloqueado', motivo: 'IP bloqueado' },
+      { texto: 'muitas requisições', motivo: 'Muitas requisicoes' },
+      { texto: 'muitas requisicoes', motivo: 'Muitas requisicoes' },
+      { texto: 'tente novamente mais tarde', motivo: 'Rate limit' },
+      { texto: '403 forbidden', motivo: 'HTTP 403' },
+      { texto: 'http 403', motivo: 'HTTP 403' },
+      { texto: '429', motivo: 'HTTP 429 Too Many Requests' },
+      { texto: 'rate limit', motivo: 'Rate limit exceeded' },
+      { texto: 'too many requests', motivo: 'Too many requests' },
+      { texto: 'access denied', motivo: 'Access denied' },
+      { texto: 'blocked', motivo: 'IP blocked' },
+      { texto: 'captcha', motivo: 'CAPTCHA detectado' },
+      { texto: 'recaptcha', motivo: 'reCAPTCHA detectado' },
+    ];
+
+    for (const sinal of sinaisBloqueio) {
+      if (mensagemLower.includes(sinal.texto)) {
+        return { bloqueado: true, motivo: sinal.motivo };
+      }
+    }
+
+    return { bloqueado: false, motivo: '' };
+  }
+
+  /**
+   * Detecta bloqueio do CNJ no conteudo da pagina
+   */
+  async detectarBloqueioCnjNaPagina(page: import('playwright').Page): Promise<{ bloqueado: boolean; motivo: string }> {
+    try {
+      const conteudo = await page.content();
+      return this.detectarBloqueioCnjNoErro(conteudo);
+    } catch {
+      return { bloqueado: false, motivo: '' };
     }
   }
 

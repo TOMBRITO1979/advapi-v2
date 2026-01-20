@@ -12,6 +12,9 @@ import {
   RotateCcw,
   AlertTriangle,
   Filter,
+  ShieldAlert,
+  Activity,
+  Ban,
 } from 'lucide-react';
 
 interface Proxy {
@@ -29,6 +32,9 @@ interface Proxy {
   totalConsultas: number;
   consultasSucesso: number;
   consultasFalha: number;
+  bloqueadoCnj?: boolean;
+  dataBloqueioCnj?: string | null;
+  necessitaSubstituicao?: boolean;
 }
 
 interface Stats {
@@ -37,6 +43,24 @@ interface Stats {
   inativos: number;
   comFalhas: number;
   disponiveis: number;
+  bloqueadosCnj?: number;
+  necessitamSubstituicao?: number;
+}
+
+interface ProxyAlerta {
+  id: string;
+  host: string;
+  porta: number;
+  dataBloqueioCnj?: string;
+  falhasConsecutivas?: number;
+  ultimoErro?: string;
+}
+
+interface Alertas {
+  total: number;
+  bloqueadosCnj: ProxyAlerta[];
+  comMuitasFalhas: ProxyAlerta[];
+  comAlgumasFalhas: ProxyAlerta[];
 }
 
 type FiltroStatus = 'todos' | 'funcionando' | 'falhos';
@@ -44,7 +68,9 @@ type FiltroStatus = 'todos' | 'funcionando' | 'falhos';
 export default function Proxies() {
   const [proxies, setProxies] = useState<Proxy[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
+  const [alertas, setAlertas] = useState<Alertas | null>(null);
   const [loading, setLoading] = useState(true);
+  const [executandoHealthCheck, setExecutandoHealthCheck] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [filtroStatus, setFiltroStatus] = useState<FiltroStatus>('todos');
   const [novoProxy, setNovoProxy] = useState({
@@ -63,16 +89,35 @@ export default function Proxies() {
   const carregarDados = async () => {
     try {
       setLoading(true);
-      const [proxiesRes, statsRes] = await Promise.all([
+      const [proxiesRes, statsRes, alertasRes] = await Promise.all([
         proxiesService.listar({ limit: 500 }),
         proxiesService.getEstatisticas(),
+        proxiesService.getAlertas(),
       ]);
       setProxies(proxiesRes.data.data);
       setStats(statsRes.data);
+      setAlertas(alertasRes.data);
     } catch (error) {
       console.error('Erro ao carregar proxies:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const executarHealthCheck = async () => {
+    if (executandoHealthCheck) return;
+
+    if (!confirm('Executar health check em todos os proxies? Isso pode demorar alguns minutos.')) return;
+
+    try {
+      setExecutandoHealthCheck(true);
+      const res = await proxiesService.executarHealthCheck();
+      alert(`${res.data.message}\n\nAcompanhe o progresso nos logs do sistema.`);
+    } catch (error) {
+      console.error('Erro ao executar health check:', error);
+      alert('Erro ao iniciar health check');
+    } finally {
+      setExecutandoHealthCheck(false);
     }
   };
 
@@ -189,6 +234,14 @@ export default function Proxies() {
             className="hidden"
           />
           <button
+            onClick={executarHealthCheck}
+            disabled={executandoHealthCheck}
+            className="flex items-center px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50"
+          >
+            <Activity size={20} className="mr-2" />
+            {executandoHealthCheck ? 'Executando...' : 'Health Check'}
+          </button>
+          <button
             onClick={() => fileInputRef.current?.click()}
             className="flex items-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
           >
@@ -205,9 +258,120 @@ export default function Proxies() {
         </div>
       </div>
 
+      {/* Banner de Alertas - Proxies Bloqueados CNJ */}
+      {alertas && alertas.bloqueadosCnj.length > 0 && (
+        <div className="mb-6 bg-red-50 border-l-4 border-red-500 rounded-lg p-4">
+          <div className="flex items-start">
+            <Ban className="h-6 w-6 text-red-500 mt-0.5" />
+            <div className="ml-3 flex-1">
+              <h3 className="text-red-800 font-semibold flex items-center">
+                <ShieldAlert className="h-5 w-5 mr-2" />
+                {alertas.bloqueadosCnj.length} Proxy(s) Bloqueado(s) pelo CNJ
+              </h3>
+              <p className="text-red-700 text-sm mt-1">
+                Estes proxies foram detectados como bloqueados pelo CNJ e precisam ser substituidos urgentemente.
+              </p>
+              <div className="mt-3 space-y-2">
+                {alertas.bloqueadosCnj.map((proxy) => (
+                  <div key={proxy.id} className="flex items-center justify-between bg-red-100 rounded px-3 py-2">
+                    <div>
+                      <span className="font-mono text-red-900">{proxy.host}:{proxy.porta}</span>
+                      {proxy.dataBloqueioCnj && (
+                        <span className="text-red-600 text-xs ml-2">
+                          (bloqueado em {new Date(proxy.dataBloqueioCnj).toLocaleString('pt-BR')})
+                        </span>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => excluirProxy(proxy.id)}
+                      className="text-red-700 hover:text-red-900 text-sm underline"
+                    >
+                      Remover
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Banner de Alertas - Proxies com Muitas Falhas */}
+      {alertas && alertas.comMuitasFalhas.length > 0 && (
+        <div className="mb-6 bg-orange-50 border-l-4 border-orange-500 rounded-lg p-4">
+          <div className="flex items-start">
+            <AlertTriangle className="h-6 w-6 text-orange-500 mt-0.5" />
+            <div className="ml-3 flex-1">
+              <h3 className="text-orange-800 font-semibold">
+                {alertas.comMuitasFalhas.length} Proxy(s) com Muitas Falhas (5+)
+              </h3>
+              <p className="text-orange-700 text-sm mt-1">
+                Estes proxies tiveram 5 ou mais falhas consecutivas e podem precisar de substituicao.
+              </p>
+              <div className="mt-3 space-y-2">
+                {alertas.comMuitasFalhas.map((proxy) => (
+                  <div key={proxy.id} className="flex items-center justify-between bg-orange-100 rounded px-3 py-2">
+                    <div>
+                      <span className="font-mono text-orange-900">{proxy.host}:{proxy.porta}</span>
+                      <span className="text-orange-600 text-xs ml-2">
+                        ({proxy.falhasConsecutivas} falhas)
+                      </span>
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => resetarProxy(proxy.id)}
+                        className="text-orange-700 hover:text-orange-900 text-sm underline"
+                      >
+                        Resetar
+                      </button>
+                      <button
+                        onClick={() => excluirProxy(proxy.id)}
+                        className="text-red-700 hover:text-red-900 text-sm underline"
+                      >
+                        Remover
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Banner de Alertas - Proxies com Algumas Falhas (Warning) */}
+      {alertas && alertas.comAlgumasFalhas.length > 0 && (
+        <div className="mb-6 bg-yellow-50 border-l-4 border-yellow-500 rounded-lg p-4">
+          <div className="flex items-start">
+            <AlertTriangle className="h-6 w-6 text-yellow-500 mt-0.5" />
+            <div className="ml-3 flex-1">
+              <h3 className="text-yellow-800 font-semibold">
+                {alertas.comAlgumasFalhas.length} Proxy(s) com Falhas Intermitentes (3-4)
+              </h3>
+              <p className="text-yellow-700 text-sm mt-1">
+                Estes proxies apresentaram algumas falhas e devem ser monitorados.
+              </p>
+              <details className="mt-2">
+                <summary className="text-yellow-700 text-sm cursor-pointer hover:underline">
+                  Ver detalhes
+                </summary>
+                <div className="mt-2 space-y-1">
+                  {alertas.comAlgumasFalhas.map((proxy) => (
+                    <div key={proxy.id} className="text-sm text-yellow-800">
+                      <span className="font-mono">{proxy.host}:{proxy.porta}</span>
+                      <span className="ml-2">({proxy.falhasConsecutivas} falhas)</span>
+                    </div>
+                  ))}
+                </div>
+              </details>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Cards de estatisticas */}
       {stats && (
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
+        <div className="grid grid-cols-2 md:grid-cols-6 gap-4 mb-6">
           <div className="bg-white rounded-lg shadow p-4">
             <div className="flex items-center">
               <Server className="h-8 w-8 text-blue-500" />
@@ -228,6 +392,15 @@ export default function Proxies() {
           </div>
           <div className="bg-white rounded-lg shadow p-4">
             <div className="flex items-center">
+              <Server className="h-8 w-8 text-purple-500" />
+              <div className="ml-3">
+                <p className="text-sm text-gray-500">Disponiveis</p>
+                <p className="text-xl font-bold">{stats.disponiveis}</p>
+              </div>
+            </div>
+          </div>
+          <div className="bg-white rounded-lg shadow p-4">
+            <div className="flex items-center">
               <XCircle className="h-8 w-8 text-red-500" />
               <div className="ml-3">
                 <p className="text-sm text-gray-500">Com Falhas</p>
@@ -235,12 +408,14 @@ export default function Proxies() {
               </div>
             </div>
           </div>
-          <div className="bg-white rounded-lg shadow p-4">
+          <div className={`rounded-lg shadow p-4 ${(stats.bloqueadosCnj || 0) > 0 ? 'bg-red-50 border border-red-200' : 'bg-white'}`}>
             <div className="flex items-center">
-              <Server className="h-8 w-8 text-purple-500" />
+              <Ban className={`h-8 w-8 ${(stats.bloqueadosCnj || 0) > 0 ? 'text-red-600' : 'text-gray-400'}`} />
               <div className="ml-3">
-                <p className="text-sm text-gray-500">Disponiveis</p>
-                <p className="text-xl font-bold">{stats.disponiveis}</p>
+                <p className="text-sm text-gray-500">Bloqueados CNJ</p>
+                <p className={`text-xl font-bold ${(stats.bloqueadosCnj || 0) > 0 ? 'text-red-600' : ''}`}>
+                  {stats.bloqueadosCnj || 0}
+                </p>
               </div>
             </div>
           </div>
@@ -352,7 +527,7 @@ export default function Proxies() {
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
               {proxiesFiltrados.map((proxy) => (
-                <tr key={proxy.id} className={!proxy.funcionando ? 'bg-red-50' : ''}>
+                <tr key={proxy.id} className={proxy.bloqueadoCnj ? 'bg-red-100' : !proxy.funcionando ? 'bg-red-50' : ''}>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="text-sm font-medium text-gray-900">
                       {proxy.host}
@@ -376,7 +551,11 @@ export default function Proxies() {
                     </div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
-                    {!proxy.funcionando ? (
+                    {proxy.bloqueadoCnj ? (
+                      <span className="px-2 py-1 text-xs rounded-full bg-red-200 text-red-900 font-semibold">
+                        Bloqueado CNJ
+                      </span>
+                    ) : !proxy.funcionando ? (
                       <span className="px-2 py-1 text-xs rounded-full bg-red-100 text-red-800">
                         Falhou
                       </span>
@@ -387,6 +566,11 @@ export default function Proxies() {
                     ) : (
                       <span className="px-2 py-1 text-xs rounded-full bg-gray-100 text-gray-800">
                         Inativo
+                      </span>
+                    )}
+                    {proxy.falhasConsecutivas > 0 && !proxy.bloqueadoCnj && (
+                      <span className="ml-1 text-xs text-orange-600">
+                        ({proxy.falhasConsecutivas} falhas)
                       </span>
                     )}
                   </td>

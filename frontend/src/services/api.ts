@@ -89,6 +89,9 @@ export const proxiesService = {
   resetarTodos: () => api.post('/proxies/resetar/todos'),
   excluirFalhos: () => api.delete('/proxies/falhos/todos'),
   getEstatisticas: () => api.get('/proxies/stats/resumo'),
+  // Health check
+  getAlertas: () => api.get('/proxies/alertas'),
+  executarHealthCheck: (proxyId?: string) => api.post('/proxies/health-check', proxyId ? { proxyId } : {}),
 };
 
 // Fila
