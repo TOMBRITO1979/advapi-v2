@@ -48,3 +48,5 @@ temp/
 
 # Test scripts
 test-*.js
+*.sql
+SESSAO*.md
