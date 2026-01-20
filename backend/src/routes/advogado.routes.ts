@@ -87,42 +87,84 @@ router.get('/:id', async (req: AuthRequest, res) => {
 
 /**
  * POST /api/advogados
- * Cadastra novo advogado para monitoramento
- * Enfileira automaticamente a primeira consulta (historico 5 anos)
+ * Cadastra novo advogado para monitoramento ou reutiliza existente
+ * Enfileira automaticamente a consulta (historico 5 anos)
  */
 router.post('/', async (req: AuthRequest, res) => {
-  const { nome, oab, ufOab, advwellCompanyId, tribunais, callbackUrl } = req.body;
+  const { nome, oab, ufOab, advwellCompanyId, advwellClientId, tribunais, callbackUrl } = req.body;
   const { adicionarConsulta } = await import('../utils/queue.js');
 
   if (!nome) {
     throw new AppError('Nome e obrigatorio', 400);
   }
 
-  // Verifica se ja existe
-  const existe = await prisma.advogado.findFirst({
-    where: {
-      nome: nome.toUpperCase(),
-      advwellCompanyId: advwellCompanyId || 'manual',
-    },
-  });
+  // Verifica se ja existe pelo nome (e OAB se fornecido)
+  const whereConditions: any[] = [
+    { nome: nome.toUpperCase() },
+  ];
 
-  if (existe) {
-    throw new AppError('Advogado ja cadastrado', 409);
+  // Se tiver OAB, busca tambem por OAB
+  if (oab) {
+    whereConditions.push({ oab: oab });
   }
 
-  const advogado = await prisma.advogado.create({
-    data: {
-      nome: nome.toUpperCase(),
-      oab,
-      ufOab,
-      advwellCompanyId: advwellCompanyId || 'manual',
-      tribunais: tribunais || [],
-      callbackUrl,
-      ativo: true,
+  let advogado = await prisma.advogado.findFirst({
+    where: {
+      OR: whereConditions,
     },
   });
 
-  // Enfileira automaticamente a primeira consulta (historico 5 anos)
+  let isNovo = false;
+
+  if (advogado) {
+    // Advogado ja existe - atualiza dados se necessario
+    const dadosAtualizar: any = {};
+
+    if (callbackUrl && callbackUrl !== advogado.callbackUrl) {
+      dadosAtualizar.callbackUrl = callbackUrl;
+    }
+    if (advwellCompanyId && advwellCompanyId !== advogado.advwellCompanyId) {
+      dadosAtualizar.advwellCompanyId = advwellCompanyId;
+    }
+    if (advwellClientId && advwellClientId !== advogado.advwellClientId) {
+      dadosAtualizar.advwellClientId = advwellClientId;
+    }
+    if (oab && !advogado.oab) {
+      dadosAtualizar.oab = oab;
+    }
+    if (ufOab && !advogado.ufOab) {
+      dadosAtualizar.ufOab = ufOab;
+    }
+
+    // Atualiza se houver mudancas
+    if (Object.keys(dadosAtualizar).length > 0) {
+      advogado = await prisma.advogado.update({
+        where: { id: advogado.id },
+        data: dadosAtualizar,
+      });
+      console.log(`[Cadastro] Advogado ${advogado.nome} atualizado | Campos: ${Object.keys(dadosAtualizar).join(', ')}`);
+    }
+
+    console.log(`[Cadastro] Advogado ${advogado.nome} ja existe, reutilizando...`);
+  } else {
+    // Advogado nao existe - cria novo
+    advogado = await prisma.advogado.create({
+      data: {
+        nome: nome.toUpperCase(),
+        oab,
+        ufOab,
+        advwellCompanyId: advwellCompanyId || 'manual',
+        advwellClientId,
+        tribunais: tribunais || [],
+        callbackUrl,
+        ativo: true,
+      },
+    });
+    isNovo = true;
+    console.log(`[Cadastro] Novo advogado ${advogado.nome} cadastrado`);
+  }
+
+  // Enfileira consulta (historico 5 anos)
   const hoje = new Date();
   const fim = hoje.toISOString().split('T')[0];
   const inicio = new Date(hoje.getFullYear() - 5, hoje.getMonth(), hoje.getDate()).toISOString().split('T')[0];
@@ -144,10 +186,11 @@ router.post('/', async (req: AuthRequest, res) => {
     prioridade: 2, // Prioridade alta para execucao imediata
   });
 
-  console.log(`[Cadastro] Advogado ${advogado.nome} cadastrado e enfileirado | Job: ${jobId} | Periodo: ${inicio} a ${fim}`);
+  console.log(`[Cadastro] Advogado ${advogado.nome} enfileirado | Job: ${jobId} | Periodo: ${inicio} a ${fim}`);
 
-  res.status(201).json({
+  res.status(isNovo ? 201 : 200).json({
     ...advogado,
+    isNovo,
     consultaInicial: {
       consultaId: consulta.id,
       jobId,
@@ -247,16 +290,10 @@ router.post('/:id/consultar', async (req: AuthRequest, res) => {
     // Data especifica informada
     inicio = dataInicio;
     tipoBusca = 'PERSONALIZADA';
-  } else if (forcarHistorico || !advogado.ultimaConsulta) {
-    // PRIMEIRA CONSULTA ou forcado: busca ultimos 5 anos
+  } else {
+    // SEMPRE busca ultimos 5 anos para garantir historico completo
     inicio = new Date(hoje.getFullYear() - 5, hoje.getMonth(), hoje.getDate()).toISOString().split('T')[0];
     tipoBusca = 'HISTORICO_5_ANOS';
-  } else {
-    // JA FOI CONSULTADO: busca ultimos 7 dias
-    const seteDiasAtras = new Date(hoje);
-    seteDiasAtras.setDate(hoje.getDate() - 7);
-    inicio = seteDiasAtras.toISOString().split('T')[0];
-    tipoBusca = 'ATUALIZACAO_7D';
   }
 
   console.log(`[Dashboard] Advogado: ${advogado.nome} | Tipo: ${tipoBusca} | Periodo: ${inicio} a ${fim}`);

@@ -137,3 +137,45 @@ export const logsService = {
 export const workersService = {
   getStatus: () => api.get('/dashboard/workers'),
 };
+
+// Requisições API (logs de chamadas)
+export const requestsService = {
+  listar: (params?: {
+    metodo?: string;
+    path?: string;
+    sucesso?: boolean;
+    origem?: string;
+    companyId?: string;
+    dataInicio?: string;
+    dataFim?: string;
+    page?: number;
+    limit?: number;
+  }) => api.get('/dashboard/requests', { params }),
+  buscar: (id: string) => api.get(`/dashboard/requests/${id}`),
+  getStats: () => api.get('/dashboard/requests/stats'),
+  limparAntigos: () => api.delete('/dashboard/requests/limpar/antigos'),
+};
+
+// Consultas/Raspagens (detalhes de scraping)
+export const consultasService = {
+  listar: (params?: {
+    status?: string;
+    advogadoId?: string;
+    dataInicio?: string;
+    dataFim?: string;
+    page?: number;
+    limit?: number;
+  }) => api.get('/dashboard/consultas', { params }),
+  buscar: (id: string) => api.get(`/dashboard/consultas/${id}`),
+  getStats: () => api.get('/dashboard/consultas/stats'),
+};
+
+// API Keys
+export const apiKeysService = {
+  listar: () => api.get('/api-keys'),
+  criar: (nome: string) => api.post('/api-keys', { nome }),
+  atualizar: (id: string, data: { ativa?: boolean; nome?: string }) =>
+    api.put(`/api-keys/${id}`, data),
+  excluir: (id: string) => api.delete(`/api-keys/${id}`),
+  getStats: () => api.get('/api-keys/stats'),
+};

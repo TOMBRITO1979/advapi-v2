@@ -657,4 +657,486 @@ router.get('/publicacoes', async (req: AuthRequest, res) => {
   });
 });
 
+// ============================================================================
+// LOGS DE REQUISICOES API
+// ============================================================================
+
+/**
+ * GET /api/dashboard/requests
+ * Lista historico de requisicoes API com filtros
+ */
+router.get('/requests', async (req: AuthRequest, res) => {
+  const {
+    page = '1',
+    limit = '50',
+    metodo,
+    path,
+    sucesso,
+    origem,
+    companyId,
+    dataInicio,
+    dataFim,
+  } = req.query;
+
+  const where: any = {};
+
+  if (metodo) {
+    where.metodo = String(metodo).toUpperCase();
+  }
+
+  if (path) {
+    where.path = { contains: String(path) };
+  }
+
+  if (sucesso !== undefined) {
+    where.sucesso = sucesso === 'true';
+  }
+
+  if (origem) {
+    where.origem = String(origem);
+  }
+
+  if (companyId) {
+    where.companyId = String(companyId);
+  }
+
+  if (dataInicio || dataFim) {
+    where.createdAt = {};
+    if (dataInicio) {
+      where.createdAt.gte = new Date(String(dataInicio));
+    }
+    if (dataFim) {
+      const fim = new Date(String(dataFim));
+      fim.setHours(23, 59, 59, 999);
+      where.createdAt.lte = fim;
+    }
+  }
+
+  const skip = (Number(page) - 1) * Number(limit);
+
+  const [requests, total] = await Promise.all([
+    prisma.apiRequestLog.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      skip,
+      take: Number(limit),
+    }),
+    prisma.apiRequestLog.count({ where }),
+  ]);
+
+  res.json({
+    data: requests.map((r) => ({
+      id: r.id,
+      metodo: r.metodo,
+      path: r.path,
+      statusCode: r.statusCode,
+      sucesso: r.sucesso,
+      erro: r.erro,
+      origem: r.origem,
+      ip: r.ip,
+      responseTime: r.responseTime,
+      companyId: r.companyId,
+      advogadoId: r.advogadoId,
+      consultaId: r.consultaId,
+      apiKeyPrefixo: r.apiKeyPrefixo,
+      createdAt: r.createdAt,
+    })),
+    pagination: {
+      page: Number(page),
+      limit: Number(limit),
+      total,
+      pages: Math.ceil(total / Number(limit)),
+    },
+  });
+});
+
+/**
+ * GET /api/dashboard/requests/:id
+ * Detalhes completos de uma requisicao
+ */
+router.get('/requests/:id', async (req: AuthRequest, res) => {
+  const { id } = req.params;
+
+  const request = await prisma.apiRequestLog.findUnique({
+    where: { id },
+  });
+
+  if (!request) {
+    return res.status(404).json({ error: 'Requisicao nao encontrada' });
+  }
+
+  res.json({
+    id: request.id,
+    metodo: request.metodo,
+    path: request.path,
+    queryParams: request.queryParams,
+    ip: request.ip,
+    userAgent: request.userAgent,
+    origem: request.origem,
+    apiKeyId: request.apiKeyId,
+    apiKeyPrefixo: request.apiKeyPrefixo,
+    requestBody: request.requestBody,
+    requestHeaders: request.requestHeaders,
+    statusCode: request.statusCode,
+    responseBody: request.responseBody,
+    responseTime: request.responseTime,
+    sucesso: request.sucesso,
+    erro: request.erro,
+    advogadoId: request.advogadoId,
+    consultaId: request.consultaId,
+    companyId: request.companyId,
+    createdAt: request.createdAt,
+  });
+});
+
+/**
+ * GET /api/dashboard/requests/stats
+ * Estatisticas de requisicoes
+ */
+router.get('/requests/stats', async (req: AuthRequest, res) => {
+  const hoje = new Date();
+  const inicioHoje = new Date(hoje.toISOString().split('T')[0]);
+  const inicioSemana = new Date(hoje);
+  inicioSemana.setDate(hoje.getDate() - 7);
+  const inicioMes = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
+
+  const [
+    totalRequests,
+    requestsHoje,
+    requestsSemana,
+    requestsMes,
+    requestsSucesso,
+    requestsErro,
+    porOrigem,
+    porPath,
+    tempoMedioResponse,
+  ] = await Promise.all([
+    prisma.apiRequestLog.count(),
+    prisma.apiRequestLog.count({ where: { createdAt: { gte: inicioHoje } } }),
+    prisma.apiRequestLog.count({ where: { createdAt: { gte: inicioSemana } } }),
+    prisma.apiRequestLog.count({ where: { createdAt: { gte: inicioMes } } }),
+    prisma.apiRequestLog.count({ where: { sucesso: true } }),
+    prisma.apiRequestLog.count({ where: { sucesso: false } }),
+    prisma.apiRequestLog.groupBy({
+      by: ['origem'],
+      _count: true,
+      orderBy: { _count: { origem: 'desc' } },
+    }),
+    prisma.apiRequestLog.groupBy({
+      by: ['path'],
+      _count: true,
+      orderBy: { _count: { path: 'desc' } },
+      take: 10,
+    }),
+    prisma.apiRequestLog.aggregate({
+      _avg: { responseTime: true },
+    }),
+  ]);
+
+  const taxaSucesso = totalRequests > 0
+    ? Math.round((requestsSucesso / totalRequests) * 100)
+    : 100;
+
+  res.json({
+    resumo: {
+      total: totalRequests,
+      hoje: requestsHoje,
+      semana: requestsSemana,
+      mes: requestsMes,
+      sucesso: requestsSucesso,
+      erro: requestsErro,
+      taxaSucesso,
+      tempoMedioMs: Math.round(tempoMedioResponse._avg.responseTime || 0),
+    },
+    porOrigem: porOrigem.map((o) => ({
+      origem: o.origem || 'UNKNOWN',
+      total: o._count,
+    })),
+    porPath: porPath.map((p) => ({
+      path: p.path,
+      total: p._count,
+    })),
+  });
+});
+
+/**
+ * DELETE /api/dashboard/requests/limpar/antigos
+ * Remove requisicoes com mais de 30 dias
+ */
+router.delete('/requests/limpar/antigos', async (req: AuthRequest, res) => {
+  const trintaDiasAtras = new Date();
+  trintaDiasAtras.setDate(trintaDiasAtras.getDate() - 30);
+
+  const deleted = await prisma.apiRequestLog.deleteMany({
+    where: {
+      createdAt: { lt: trintaDiasAtras },
+    },
+  });
+
+  res.json({
+    message: `${deleted.count} requisicoes antigas removidas`,
+    removidos: deleted.count,
+  });
+});
+
+// ============================================================================
+// DETALHES DE CONSULTAS/RASPAGENS
+// ============================================================================
+
+/**
+ * GET /api/dashboard/consultas
+ * Lista consultas/raspagens com detalhes expandidos
+ */
+router.get('/consultas', async (req: AuthRequest, res) => {
+  const {
+    page = '1',
+    limit = '50',
+    status,
+    advogadoId,
+    dataInicio,
+    dataFim,
+  } = req.query;
+
+  const where: any = {};
+
+  if (status) {
+    where.status = String(status).toUpperCase();
+  }
+
+  if (advogadoId) {
+    where.advogadoId = String(advogadoId);
+  }
+
+  if (dataInicio || dataFim) {
+    where.createdAt = {};
+    if (dataInicio) {
+      where.createdAt.gte = new Date(String(dataInicio));
+    }
+    if (dataFim) {
+      const fim = new Date(String(dataFim));
+      fim.setHours(23, 59, 59, 999);
+      where.createdAt.lte = fim;
+    }
+  }
+
+  const skip = (Number(page) - 1) * Number(limit);
+
+  const [consultas, total] = await Promise.all([
+    prisma.consulta.findMany({
+      where,
+      include: {
+        advogado: { select: { nome: true, oab: true } },
+        proxy: { select: { host: true, porta: true, provedor: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+      skip,
+      take: Number(limit),
+    }),
+    prisma.consulta.count({ where }),
+  ]);
+
+  res.json({
+    data: consultas.map((c) => ({
+      id: c.id,
+      advogado: c.advogado.nome,
+      oab: c.advogado.oab,
+      status: c.status,
+      dataInicio: c.dataInicio,
+      dataFim: c.dataFim,
+      tribunal: c.tribunal,
+      publicacoesEncontradas: c.publicacoesEncontradas,
+      publicacoesNovas: c.publicacoesNovas,
+      tentativas: c.tentativas,
+      erro: c.erro,
+      // Detalhes de raspagem
+      duracaoMs: c.duracaoMs,
+      duracaoFormatada: c.duracaoMs ? formatarDuracao(c.duracaoMs) : null,
+      paginasNavegadas: c.paginasNavegadas,
+      blocosProcessados: c.blocosProcessados,
+      captchaDetectado: c.captchaDetectado,
+      bloqueioDetectado: c.bloqueioDetectado,
+      // Proxy usado
+      proxy: c.proxy ? {
+        host: c.proxy.host,
+        porta: c.proxy.porta,
+        provedor: c.proxy.provedor,
+      } : null,
+      // Timestamps
+      iniciadoEm: c.iniciadoEm,
+      finalizadoEm: c.finalizadoEm,
+      createdAt: c.createdAt,
+    })),
+    pagination: {
+      page: Number(page),
+      limit: Number(limit),
+      total,
+      pages: Math.ceil(total / Number(limit)),
+    },
+  });
+});
+
+/**
+ * GET /api/dashboard/consultas/:id
+ * Detalhes completos de uma consulta/raspagem
+ */
+router.get('/consultas/:id', async (req: AuthRequest, res) => {
+  const { id } = req.params;
+
+  const consulta = await prisma.consulta.findUnique({
+    where: { id },
+    include: {
+      advogado: { select: { id: true, nome: true, oab: true, ufOab: true } },
+      proxy: true,
+    },
+  });
+
+  if (!consulta) {
+    return res.status(404).json({ error: 'Consulta nao encontrada' });
+  }
+
+  // Busca publicacoes encontradas nesta consulta (aproximado por data)
+  const publicacoes = await prisma.publicacao.findMany({
+    where: {
+      advogadoId: consulta.advogadoId,
+      createdAt: {
+        gte: consulta.iniciadoEm || consulta.createdAt,
+        lte: consulta.finalizadoEm || new Date(),
+      },
+    },
+    orderBy: { dataPublicacao: 'desc' },
+    take: 20,
+  });
+
+  res.json({
+    id: consulta.id,
+    advogado: {
+      id: consulta.advogado.id,
+      nome: consulta.advogado.nome,
+      oab: consulta.advogado.oab,
+      ufOab: consulta.advogado.ufOab,
+    },
+    parametros: {
+      dataInicio: consulta.dataInicio,
+      dataFim: consulta.dataFim,
+      tribunal: consulta.tribunal,
+    },
+    status: consulta.status,
+    resultado: {
+      publicacoesEncontradas: consulta.publicacoesEncontradas,
+      publicacoesNovas: consulta.publicacoesNovas,
+      erro: consulta.erro,
+    },
+    raspagem: {
+      duracaoMs: consulta.duracaoMs,
+      duracaoFormatada: consulta.duracaoMs ? formatarDuracao(consulta.duracaoMs) : null,
+      paginasNavegadas: consulta.paginasNavegadas,
+      blocosProcessados: consulta.blocosProcessados,
+      captchaDetectado: consulta.captchaDetectado,
+      bloqueioDetectado: consulta.bloqueioDetectado,
+      detalhesExtras: consulta.detalhesRaspagem,
+    },
+    proxy: consulta.proxy ? {
+      id: consulta.proxy.id,
+      host: consulta.proxy.host,
+      porta: consulta.proxy.porta,
+      provedor: consulta.proxy.provedor,
+      funcionando: consulta.proxy.funcionando,
+    } : null,
+    execucao: {
+      tentativas: consulta.tentativas,
+      maxTentativas: consulta.maxTentativas,
+      prioridade: consulta.prioridade,
+      agendadoPara: consulta.agendadoPara,
+      iniciadoEm: consulta.iniciadoEm,
+      finalizadoEm: consulta.finalizadoEm,
+    },
+    publicacoesEncontradas: publicacoes.map((p) => ({
+      id: p.id,
+      numeroProcesso: p.numeroProcesso,
+      dataPublicacao: p.dataPublicacao,
+      tipoComunicacao: p.tipoComunicacao,
+      status: p.status,
+    })),
+    createdAt: consulta.createdAt,
+  });
+});
+
+/**
+ * GET /api/dashboard/consultas/stats
+ * Estatisticas de consultas/raspagens
+ */
+router.get('/consultas/stats', async (req: AuthRequest, res) => {
+  const hoje = new Date();
+  const inicioHoje = new Date(hoje.toISOString().split('T')[0]);
+  const inicioSemana = new Date(hoje);
+  inicioSemana.setDate(hoje.getDate() - 7);
+
+  const [
+    totalConsultas,
+    consultasHoje,
+    consultasSemana,
+    porStatus,
+    comCaptcha,
+    comBloqueio,
+    tempoMedio,
+    paginasMedias,
+  ] = await Promise.all([
+    prisma.consulta.count(),
+    prisma.consulta.count({ where: { createdAt: { gte: inicioHoje } } }),
+    prisma.consulta.count({ where: { createdAt: { gte: inicioSemana } } }),
+    prisma.consulta.groupBy({
+      by: ['status'],
+      _count: true,
+    }),
+    prisma.consulta.count({ where: { captchaDetectado: true } }),
+    prisma.consulta.count({ where: { bloqueioDetectado: true } }),
+    prisma.consulta.aggregate({
+      _avg: { duracaoMs: true },
+      where: { status: 'CONCLUIDA' },
+    }),
+    prisma.consulta.aggregate({
+      _avg: { paginasNavegadas: true },
+      where: { status: 'CONCLUIDA' },
+    }),
+  ]);
+
+  const statusMap = porStatus.reduce((acc, s) => {
+    acc[s.status] = s._count;
+    return acc;
+  }, {} as Record<string, number>);
+
+  res.json({
+    resumo: {
+      total: totalConsultas,
+      hoje: consultasHoje,
+      semana: consultasSemana,
+      pendentes: statusMap['PENDENTE'] || 0,
+      processando: statusMap['PROCESSANDO'] || 0,
+      concluidas: statusMap['CONCLUIDA'] || 0,
+      erros: statusMap['ERRO'] || 0,
+      canceladas: statusMap['CANCELADA'] || 0,
+    },
+    problemas: {
+      captchasDetectados: comCaptcha,
+      bloqueiosDetectados: comBloqueio,
+    },
+    performance: {
+      tempoMedioMs: Math.round(tempoMedio._avg.duracaoMs || 0),
+      tempoMedioFormatado: formatarDuracao(Math.round(tempoMedio._avg.duracaoMs || 0)),
+      paginasMedias: Math.round(paginasMedias._avg.paginasNavegadas || 0),
+    },
+  });
+});
+
+/**
+ * Formata duracao em ms para string legivel
+ */
+function formatarDuracao(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
+  const min = Math.floor(ms / 60000);
+  const sec = Math.round((ms % 60000) / 1000);
+  return `${min}m ${sec}s`;
+}
+
 export default router;

@@ -42,6 +42,28 @@ interface ProxyConfig {
   protocolo: string;
 }
 
+// Interface para detalhes da raspagem
+export interface DetalhesRaspagem {
+  duracaoMs: number;
+  paginasNavegadas: number;
+  blocosProcessados: number;
+  captchaDetectado: boolean;
+  bloqueioDetectado: boolean;
+  proxyUsado: { id: string; host: string; porta: number } | null;
+  detalhesExtras: {
+    totalBruto: number;
+    totalAposDeduplicacao: number;
+    errosPorBloco: string[];
+    apiInterceptada: boolean;
+  };
+}
+
+// Interface para resultado da raspagem
+export interface ResultadoRaspagem {
+  processos: ProcessoEncontrado[];
+  detalhes: DetalhesRaspagem;
+}
+
 // Interface para resposta da API do HComunica
 interface HComunicaResponse {
   content?: Array<{
@@ -86,7 +108,7 @@ export class ScraperService {
     }
   }
 
-  private async obterProxy(): Promise<ProxyConfig | null> {
+  private async obterProxy(): Promise<(ProxyConfig & { id: string }) | null> {
     const proxy = await prisma.proxy.findFirst({
       where: {
         ativo: true,
@@ -108,6 +130,7 @@ export class ScraperService {
       });
 
       return {
+        id: proxy.id,
         host: proxy.host,
         porta: proxy.porta,
         usuario: proxy.usuario,
@@ -159,6 +182,317 @@ export class ScraperService {
         consultaId,
       },
     });
+  }
+
+  /**
+   * Busca publicacoes dividindo em blocos de 1 ano para evitar limite de paginacao
+   * Util para buscas de longo periodo (ex: 5 anos)
+   * Retorna processos e detalhes da raspagem
+   */
+  async buscarPublicacoesEmBlocos(
+    nomeAdvogado: string,
+    dataInicio: string,
+    dataFim: string,
+    tribunal?: string
+  ): Promise<ResultadoRaspagem> {
+    const inicioTime = Date.now();
+    const inicio = new Date(dataInicio);
+    const fim = new Date(dataFim);
+    const diferencaAnos = (fim.getTime() - inicio.getTime()) / (1000 * 60 * 60 * 24 * 365);
+
+    // Detalhes da raspagem
+    const detalhes: DetalhesRaspagem = {
+      duracaoMs: 0,
+      paginasNavegadas: 0,
+      blocosProcessados: 0,
+      captchaDetectado: false,
+      bloqueioDetectado: false,
+      proxyUsado: null,
+      detalhesExtras: {
+        totalBruto: 0,
+        totalAposDeduplicacao: 0,
+        errosPorBloco: [],
+        apiInterceptada: false,
+      },
+    };
+
+    // Se periodo <= 1 ano, busca diretamente
+    if (diferencaAnos <= 1) {
+      console.log(`[Scraper] Periodo <= 1 ano, buscando diretamente`);
+      const resultado = await this.buscarPublicacoesComDetalhes(nomeAdvogado, dataInicio, dataFim, tribunal);
+
+      detalhes.duracaoMs = Date.now() - inicioTime;
+      detalhes.paginasNavegadas = resultado.paginasNavegadas;
+      detalhes.blocosProcessados = 1;
+      detalhes.captchaDetectado = resultado.captchaDetectado;
+      detalhes.bloqueioDetectado = resultado.bloqueioDetectado;
+      detalhes.proxyUsado = resultado.proxyUsado;
+      detalhes.detalhesExtras.apiInterceptada = resultado.apiInterceptada;
+      detalhes.detalhesExtras.totalBruto = resultado.processos.length;
+      detalhes.detalhesExtras.totalAposDeduplicacao = resultado.processos.length;
+
+      return { processos: resultado.processos, detalhes };
+    }
+
+    // Divide em blocos de 1 ano
+    const blocos: { inicio: string; fim: string }[] = [];
+    let blocoInicio = new Date(inicio);
+
+    while (blocoInicio < fim) {
+      const blocoFim = new Date(blocoInicio);
+      blocoFim.setFullYear(blocoFim.getFullYear() + 1);
+
+      // Nao ultrapassa a data fim
+      const blocoFimReal = blocoFim > fim ? fim : blocoFim;
+
+      blocos.push({
+        inicio: blocoInicio.toISOString().split('T')[0],
+        fim: blocoFimReal.toISOString().split('T')[0],
+      });
+
+      blocoInicio = new Date(blocoFimReal);
+    }
+
+    console.log(`[Scraper] Dividindo busca em ${blocos.length} blocos de ~1 ano`);
+
+    // Busca cada bloco
+    const todosProcessos: ProcessoEncontrado[] = [];
+
+    for (let i = 0; i < blocos.length; i++) {
+      const bloco = blocos[i];
+      console.log(`[Scraper] Bloco ${i + 1}/${blocos.length}: ${bloco.inicio} a ${bloco.fim}`);
+
+      try {
+        const resultado = await this.buscarPublicacoesComDetalhes(nomeAdvogado, bloco.inicio, bloco.fim, tribunal);
+        console.log(`[Scraper] Bloco ${i + 1}: ${resultado.processos.length} processos encontrados`);
+        todosProcessos.push(...resultado.processos);
+
+        // Acumula detalhes
+        detalhes.blocosProcessados++;
+        detalhes.paginasNavegadas += resultado.paginasNavegadas;
+        if (resultado.captchaDetectado) detalhes.captchaDetectado = true;
+        if (resultado.bloqueioDetectado) detalhes.bloqueioDetectado = true;
+        if (!detalhes.proxyUsado && resultado.proxyUsado) {
+          detalhes.proxyUsado = resultado.proxyUsado;
+        }
+        if (resultado.apiInterceptada) {
+          detalhes.detalhesExtras.apiInterceptada = true;
+        }
+
+        // Delay entre blocos para nao sobrecarregar
+        if (i < blocos.length - 1) {
+          const delay = 5000 + Math.random() * 5000;
+          console.log(`[Scraper] Aguardando ${Math.round(delay / 1000)}s antes do proximo bloco...`);
+          await new Promise(r => setTimeout(r, delay));
+        }
+      } catch (error: any) {
+        console.error(`[Scraper] Erro no bloco ${i + 1}: ${error.message}`);
+        detalhes.detalhesExtras.errosPorBloco.push(`Bloco ${i + 1}: ${error.message}`);
+
+        // Detecta bloqueio/captcha no erro
+        if (error.message?.includes('captcha')) detalhes.captchaDetectado = true;
+        if (error.message?.includes('blocked') || error.message?.includes('403')) {
+          detalhes.bloqueioDetectado = true;
+        }
+        // Continua com os proximos blocos mesmo se um falhar
+      }
+    }
+
+    // Remove duplicados
+    detalhes.detalhesExtras.totalBruto = todosProcessos.length;
+    const processosUnicos = this.removerDuplicados(todosProcessos);
+    detalhes.detalhesExtras.totalAposDeduplicacao = processosUnicos.length;
+    detalhes.duracaoMs = Date.now() - inicioTime;
+
+    console.log(`[Scraper] Total apos combinar blocos: ${processosUnicos.length} processos unicos`);
+
+    return { processos: processosUnicos, detalhes };
+  }
+
+  /**
+   * Busca publicacoes com retorno de detalhes de raspagem
+   */
+  private async buscarPublicacoesComDetalhes(
+    nomeAdvogado: string,
+    dataInicio: string,
+    dataFim: string,
+    tribunal?: string
+  ): Promise<{
+    processos: ProcessoEncontrado[];
+    paginasNavegadas: number;
+    captchaDetectado: boolean;
+    bloqueioDetectado: boolean;
+    proxyUsado: { id: string; host: string; porta: number } | null;
+    apiInterceptada: boolean;
+  }> {
+    const resultado = {
+      processos: [] as ProcessoEncontrado[],
+      paginasNavegadas: 1,
+      captchaDetectado: false,
+      bloqueioDetectado: false,
+      proxyUsado: null as { id: string; host: string; porta: number } | null,
+      apiInterceptada: false,
+    };
+
+    await this.iniciar();
+
+    const proxy = await this.obterProxy();
+    if (proxy) {
+      resultado.proxyUsado = { id: proxy.id, host: proxy.host, porta: proxy.porta };
+    }
+
+    let context;
+
+    try {
+      const contextOptions: any = {
+        viewport: { width: 1920, height: 1080 },
+        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        ignoreHTTPSErrors: true,
+      };
+
+      if (proxy) {
+        contextOptions.proxy = {
+          server: `http://${proxy.host}:${proxy.porta}`,
+          username: proxy.usuario || undefined,
+          password: proxy.senha || undefined,
+        };
+      }
+
+      context = await this.browser!.newContext(contextOptions);
+      const page = await context.newPage();
+
+      // Desabilita o Service Worker para capturar as chamadas reais da API
+      await page.addInitScript(`
+        if ('serviceWorker' in navigator) {
+          navigator.serviceWorker.register = () => Promise.reject('SW disabled');
+          navigator.serviceWorker.getRegistrations().then(registrations => {
+            registrations.forEach(r => r.unregister());
+          });
+        }
+        if ('caches' in window) {
+          caches.keys().then(names => {
+            names.forEach(name => caches.delete(name));
+          });
+        }
+      `);
+
+      // Armazena todas as respostas da API capturadas
+      const apiResponses: HComunicaResponse[] = [];
+
+      // Intercepta respostas da API real do HComunica
+      page.on('response', async (response: Response) => {
+        const url = response.url();
+        const contentType = response.headers()['content-type'] || '';
+
+        if ((url.includes('hcomunicaapi.cnj.jus.br') || url.includes('/comunicacao')) && contentType.includes('application/json')) {
+          try {
+            const json = await response.json();
+            resultado.apiInterceptada = true;
+            if (json) {
+              apiResponses.push(json);
+            }
+          } catch (e) {
+            // ignora
+          }
+        }
+
+        // Detecta captcha ou bloqueio
+        if (url.includes('captcha') || url.includes('recaptcha')) {
+          resultado.captchaDetectado = true;
+        }
+      });
+
+      // Delay aleatorio
+      const delay = 2000 + Math.random() * 3000;
+      await new Promise((r) => setTimeout(r, delay));
+
+      // Monta URL com parametros
+      const params = new URLSearchParams({
+        nomeAdvogado: nomeAdvogado.trim(),
+        dataDisponibilizacaoInicio: dataInicio,
+        dataDisponibilizacaoFim: dataFim,
+      });
+      if (tribunal) {
+        params.set('siglaTribunal', tribunal.toUpperCase());
+      }
+
+      const url = `${HCOMUNICA_URL}/consulta?${params.toString()}`;
+
+      console.log(`[Scraper] Buscando publicacoes para: ${nomeAdvogado}`);
+      console.log(`[Scraper] Periodo: ${dataInicio} a ${dataFim}`);
+      if (proxy) console.log(`[Scraper] Usando proxy: ${proxy.host}:${proxy.porta}`);
+
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 90000 });
+      await page.waitForTimeout(15000);
+
+      // Verifica se ha captcha na pagina
+      const temCaptcha = await page.evaluate(`
+        document.body.innerHTML.includes('captcha') ||
+        document.body.innerHTML.includes('recaptcha') ||
+        document.querySelector('iframe[src*="captcha"]') !== null
+      `) as boolean;
+      if (temCaptcha) {
+        resultado.captchaDetectado = true;
+      }
+
+      // Se capturou respostas da API, extrai os processos
+      if (apiResponses.length > 0) {
+        resultado.processos = this.extrairProcessosDaApi(apiResponses);
+
+        const primeiraResposta = apiResponses[0];
+        let totalPages = primeiraResposta.totalPages ||
+                         (primeiraResposta as any).paginas ||
+                         (primeiraResposta as any).pages;
+
+        const totalElements = primeiraResposta.totalElements ||
+                              (primeiraResposta as any).count ||
+                              (primeiraResposta as any).total;
+
+        if (!totalPages && totalElements) {
+          const pageSize = primeiraResposta.size || (primeiraResposta as any).pageSize || 5;
+          totalPages = Math.ceil(totalElements / pageSize);
+        }
+
+        if (totalPages && totalPages > 1) {
+          const maisProcessos = await this.navegarPaginasApi(page, totalPages);
+          resultado.processos.push(...maisProcessos);
+          resultado.paginasNavegadas = Math.min(totalPages, 50);
+        }
+      }
+
+      // Fallback: extrai do HTML
+      if (resultado.processos.length === 0) {
+        resultado.processos = await this.extrairTodosProcessos(page);
+      }
+
+      resultado.processos = this.removerDuplicados(resultado.processos);
+
+      await context.close();
+      return resultado;
+    } catch (error: any) {
+      console.error(`[Scraper] Erro: ${error.message}`);
+
+      const mensagemErro = error.message || '';
+      resultado.bloqueioDetectado = mensagemErro.includes('blocked') ||
+                                     mensagemErro.includes('403') ||
+                                     mensagemErro.includes('rate limit');
+      resultado.captchaDetectado = mensagemErro.includes('captcha');
+
+      if (proxy) {
+        await this.registrarFalhaProxy(proxy, mensagemErro);
+      }
+
+      await this.registrarErroScraper(
+        resultado.bloqueioDetectado ? 'Possivel bloqueio detectado' : 'Erro ao buscar publicacoes',
+        `Erro durante scraping para ${nomeAdvogado}: ${mensagemErro}`,
+      );
+
+      if (context) {
+        await context.close();
+      }
+
+      throw error;
+    }
   }
 
   async buscarPublicacoes(
@@ -216,18 +550,31 @@ export class ScraperService {
         const url = response.url();
         const contentType = response.headers()['content-type'] || '';
 
-        // Captura respostas da API real
-        if (url.includes('hcomunicaapi.cnj.jus.br/api/v1/comunicacao') && contentType.includes('application/json')) {
+        // Captura respostas da API real (inclui comunicacao e comunicacoes)
+        if ((url.includes('hcomunicaapi.cnj.jus.br') || url.includes('/comunicacao')) && contentType.includes('application/json')) {
           try {
             const json = await response.json();
-            console.log(`[Scraper] *** API REAL INTERCEPTADA: ${url.substring(0, 120)}...`);
+            console.log(`[Scraper] *** API INTERCEPTADA: ${url.substring(0, 120)}...`);
 
             // A API retorna os dados diretamente ou em content/data
             if (json) {
-              const totalItems = json.totalElements || json.total || json.totalRegistros ||
+              const totalItems = json.totalElements || json.total || json.totalRegistros || json.count ||
                                 (json.content ? json.content.length : 0) ||
+                                (json.items ? json.items.length : 0) ||
                                 (Array.isArray(json) ? json.length : 0);
-              console.log(`[Scraper] Total elementos na pagina: ${totalItems}`);
+              const totalPaginas = json.totalPages || json.paginas || Math.ceil(totalItems / (json.size || json.pageSize || 5));
+              console.log(`[Scraper] Total elementos: ${totalItems}, Total paginas: ${totalPaginas}, Size: ${json.size || json.pageSize || 'N/A'}`);
+              console.log(`[Scraper] Campos disponiveis: ${Object.keys(json).join(', ')}`);
+
+              // Debug: mostra estrutura dos items
+              const items = json.content || json.items || json.data || [];
+              if (items.length > 0) {
+                console.log(`[Scraper] Items encontrados: ${items.length}`);
+                console.log(`[Scraper] Campos do primeiro item: ${Object.keys(items[0]).join(', ')}`);
+              } else {
+                console.log(`[Scraper] Items vazio. Count: ${json.count}, Status: ${json.status}, Message: ${json.message}`);
+              }
+
               apiResponses.push(json);
             }
           } catch (e) {
@@ -257,11 +604,11 @@ export class ScraperService {
       console.log(`[Scraper] URL: ${url}`);
       if (proxy) console.log(`[Scraper] Usando proxy: ${proxy.host}:${proxy.porta}`);
 
-      // Acessa a pagina
-      await page.goto(url, { waitUntil: 'networkidle', timeout: 60000 });
+      // Acessa a pagina - usa 'domcontentloaded' ao inves de 'networkidle' pois SPAs nunca ficam idle
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 90000 });
 
-      // Aguarda a SPA carregar e fazer as chamadas XHR
-      await page.waitForTimeout(10000);
+      // Aguarda a SPA carregar e fazer as chamadas XHR (aumentado para garantir captura)
+      await page.waitForTimeout(15000);
 
       // Se capturou respostas da API, extrai os processos
       let processos: ProcessoEncontrado[] = [];
@@ -272,10 +619,30 @@ export class ScraperService {
 
         // Se a API tem paginacao, navega pelas paginas
         const primeiraResposta = apiResponses[0];
-        if (primeiraResposta.totalPages && primeiraResposta.totalPages > 1) {
-          console.log(`[Scraper] API tem ${primeiraResposta.totalPages} paginas, navegando...`);
-          const maisProcessos = await this.navegarPaginasApi(page, primeiraResposta.totalPages);
+
+        // Calcula total de paginas - tenta varios campos possiveis
+        let totalPages = primeiraResposta.totalPages ||
+                         (primeiraResposta as any).paginas ||
+                         (primeiraResposta as any).pages;
+
+        // Se nao veio totalPages, calcula baseado em totalElements ou count
+        const totalElements = primeiraResposta.totalElements ||
+                              (primeiraResposta as any).count ||
+                              (primeiraResposta as any).total;
+
+        if (!totalPages && totalElements) {
+          const pageSize = primeiraResposta.size || (primeiraResposta as any).pageSize || (primeiraResposta as any).itensPorPagina || 5;
+          totalPages = Math.ceil(totalElements / pageSize);
+          console.log(`[Scraper] totalPages calculado: ${totalPages} (${totalElements} elementos / ${pageSize} por pagina)`);
+        }
+
+        console.log(`[Scraper] Processos na 1a pagina: ${processos.length}, Total paginas detectado: ${totalPages || 'N/A'}`);
+
+        if (totalPages && totalPages > 1) {
+          console.log(`[Scraper] API tem ${totalPages} paginas, navegando...`);
+          const maisProcessos = await this.navegarPaginasApi(page, totalPages);
           processos.push(...maisProcessos);
+          console.log(`[Scraper] Total apos paginacao: ${processos.length} processos`);
         }
       }
 
@@ -327,35 +694,42 @@ export class ScraperService {
     const processos: ProcessoEncontrado[] = [];
 
     for (const response of responses) {
-      const items = response.content || (response as any).data || [];
+      // Suporta diferentes estruturas de resposta da API (content, items, data)
+      const items = response.content || (response as any).items || (response as any).data || [];
 
       if (!Array.isArray(items)) continue;
 
       for (const item of items) {
-        if (!item.numeroProcesso) continue;
+        // Suporta tanto camelCase quanto snake_case (API do CNJ usa snake_case)
+        const numeroProcesso = item.numeroProcesso || item.numero_processo || item.numeroprocessocommascara;
+        if (!numeroProcesso) continue;
 
         const textoBruto = item.texto ? item.texto.substring(0, 5000) : null;
         const dadosExtraidos = this.extrairDadosEstruturados(textoBruto);
 
-        // Extrai advogados do processo
-        const advogadosProcesso: AdvogadoProcesso[] | null = item.advogados && item.advogados.length > 0
-          ? item.advogados.map((adv: { nome: string; numeroOab?: string }) => ({ nome: adv.nome, oab: adv.numeroOab || null }))
+        // Extrai advogados do processo (pode vir como advogados ou destinatarioadvogados)
+        const advogadosRaw = item.advogados || item.destinatarioadvogados || [];
+        const advogadosProcesso: AdvogadoProcesso[] | null = advogadosRaw.length > 0
+          ? advogadosRaw.map((adv: any) => ({ nome: adv.nome || adv.nomeAdvogado, oab: adv.numeroOab || adv.oab || null }))
           : null;
 
         // Usa nomeOrgao da API se disponivel, senao extrai do texto
         const nomeOrgao = item.nomeOrgao || dadosExtraidos.nomeOrgao || null;
 
+        // Data pode vir como dataDisponibilizacao ou data_disponibilizacao
+        const dataDisp = item.dataDisponibilizacao || item.data_disponibilizacao || item.datadisponibilizacao;
+
         processos.push({
-          numeroProcesso: normalizarNumeroProcesso(item.numeroProcesso),
-          siglaTribunal: item.siglaTribunal || this.extrairTribunalDoNumero(item.numeroProcesso),
-          dataPublicacao: item.dataDisponibilizacao ? item.dataDisponibilizacao.split('T')[0] : null,
-          tipoComunicacao: item.tipoComunicacao || item.textoCategoria || null,
+          numeroProcesso: normalizarNumeroProcesso(numeroProcesso),
+          siglaTribunal: item.siglaTribunal || this.extrairTribunalDoNumero(numeroProcesso),
+          dataPublicacao: dataDisp ? String(dataDisp).split('T')[0] : null,
+          tipoComunicacao: item.tipoComunicacao || item.textoCategoria || item.nomeClasse || null,
           textoComunicacao: textoBruto,
           textoLimpo: dadosExtraidos.textoLimpo || null,
           parteAutor: dadosExtraidos.parteAutor,
           parteReu: dadosExtraidos.parteReu,
           comarca: dadosExtraidos.comarca,
-          classeProcessual: dadosExtraidos.classeProcessual,
+          classeProcessual: item.nomeClasse || dadosExtraidos.classeProcessual,
           advogadosProcesso,
           nomeOrgao,
         });
@@ -380,16 +754,21 @@ export class ScraperService {
 
       const responseHandler = async (response: Response) => {
         const url = response.url();
-        if (url.includes('/comunicacoes') || url.includes('/api/')) {
+        // Captura API real do HComunica (comunicacao singular ou comunicacoes plural)
+        if (url.includes('hcomunicaapi.cnj.jus.br') || url.includes('/comunicacao') || url.includes('/comunicacoes')) {
           try {
             const contentType = response.headers()['content-type'] || '';
             if (contentType.includes('application/json')) {
               const json = await response.json();
-              if (json && json.content) {
+              console.log(`[Scraper] Paginacao - API interceptada: ${url.substring(0, 80)}...`);
+              // Suporta content, items ou array direto
+              if (json && (json.content || json.items || Array.isArray(json))) {
                 paginaResponses.push(json);
               }
             }
-          } catch (e) {}
+          } catch (e) {
+            console.log(`[Scraper] Paginacao - Erro ao parsear: ${e}`);
+          }
         }
       };
 
@@ -402,8 +781,8 @@ export class ScraperService {
         break;
       }
 
-      // Aguarda carregar
-      await page.waitForTimeout(3000);
+      // Aguarda carregar (aumentado para dar tempo da API responder)
+      await page.waitForTimeout(5000);
 
       // Remove o handler para nao duplicar
       page.removeListener('response', responseHandler);
@@ -424,12 +803,17 @@ export class ScraperService {
    */
   private removerDuplicados(processos: ProcessoEncontrado[]): ProcessoEncontrado[] {
     const vistos = new Set<string>();
-    return processos.filter(p => {
+    const duplicados = processos.length;
+    const resultado = processos.filter(p => {
       const numNormalizado = normalizarNumeroProcesso(p.numeroProcesso);
       if (vistos.has(numNormalizado)) return false;
       vistos.add(numNormalizado);
       return true;
     });
+    if (duplicados !== resultado.length) {
+      console.log(`[Scraper] Deduplicacao: ${duplicados} comunicacoes -> ${resultado.length} processos unicos (${duplicados - resultado.length} duplicados)`);
+    }
+    return resultado;
   }
 
   /**

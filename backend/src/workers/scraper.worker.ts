@@ -62,15 +62,18 @@ const worker = new Worker<ConsultaJob>(
     });
 
     try {
-      // Executa scraping
-      const processos = await scraperService.buscarPublicacoes(
+      // Executa scraping em blocos de 1 ano (evita limite de 50 paginas)
+      const resultado = await scraperService.buscarPublicacoesEmBlocos(
         nome,
         dataInicio,
         dataFim,
         tribunal
       );
 
+      const { processos, detalhes } = resultado;
+
       console.log(`[Worker] Encontrados ${processos.length} processos`);
+      console.log(`[Worker] Detalhes: ${detalhes.blocosProcessados} blocos, ${detalhes.paginasNavegadas} paginas, ${detalhes.duracaoMs}ms`);
 
       // Salva publicacoes no banco
       let novas = 0;
@@ -136,7 +139,7 @@ const worker = new Worker<ConsultaJob>(
         },
       });
 
-      // Atualiza status da consulta
+      // Atualiza status da consulta com detalhes de raspagem
       await prisma.consulta.updateMany({
         where: {
           advogadoId,
@@ -146,6 +149,14 @@ const worker = new Worker<ConsultaJob>(
           status: 'CONCLUIDA',
           finalizadoEm: new Date(),
           publicacoesEncontradas: processos.length,
+          publicacoesNovas: novas,
+          duracaoMs: detalhes.duracaoMs,
+          paginasNavegadas: detalhes.paginasNavegadas,
+          blocosProcessados: detalhes.blocosProcessados,
+          captchaDetectado: detalhes.captchaDetectado,
+          bloqueioDetectado: detalhes.bloqueioDetectado,
+          proxyId: detalhes.proxyUsado?.id || null,
+          detalhesRaspagem: detalhes.detalhesExtras,
         },
       });
 
@@ -359,6 +370,25 @@ setInterval(agendarConsultasAutomaticas, 30 * 60 * 1000);
 
 // Executa uma vez ao iniciar (depois de 10 segundos)
 setTimeout(agendarConsultasAutomaticas, 10000);
+
+// Reset de contadores de proxy a cada hora (distribui uso entre todos os proxies)
+async function resetarContadoresProxy(): Promise<void> {
+  try {
+    const resultado = await prisma.proxy.updateMany({
+      where: { ativo: true },
+      data: { consultasHoraAtual: 0 },
+    });
+    console.log(`[Proxy] Contadores resetados: ${resultado.count} proxies`);
+  } catch (error: any) {
+    console.error(`[Proxy] Erro ao resetar contadores: ${error.message}`);
+  }
+}
+
+// Executa reset de proxies a cada hora
+setInterval(resetarContadoresProxy, 60 * 60 * 1000);
+
+// Reset inicial ao iniciar (garante distribuicao desde o inicio)
+setTimeout(resetarContadoresProxy, 5000);
 
 // Graceful shutdown
 process.on('SIGTERM', async () => {

@@ -135,11 +135,20 @@ model Consulta {
 
   // Resultado
   publicacoesEncontradas Int?
+  publicacoesNovas       Int?      // Quantas eram realmente novas (nao duplicadas)
   erro            String?
 
   // Proxy usado
   proxyId         String?
   proxy           Proxy?         @relation(fields: [proxyId], references: [id])
+
+  // Detalhes da raspagem
+  duracaoMs       Int?            // Duracao total em milissegundos
+  paginasNavegadas Int?           // Quantas paginas foram navegadas
+  blocosProcessados Int?          // Quantos blocos de 1 ano foram processados
+  captchaDetectado Boolean        @default(false)
+  bloqueioDetectado Boolean       @default(false)
+  detalhesRaspagem Json?          // Detalhes extras da raspagem
 
   // Timestamps
   agendadoPara    DateTime       @default(now())
@@ -324,4 +333,51 @@ model ApiKey {
   @@index([key])
   @@index([ativa])
   @@index([usuarioId])
+}
+
+// ============================================================================
+// LOG DE REQUISICOES API
+// ============================================================================
+
+model ApiRequestLog {
+  id              String   @id @default(uuid())
+
+  // Identificacao da requisicao
+  metodo          String              // GET, POST, PUT, DELETE
+  path            String              // /api/consulta, /api/advogados, etc
+  queryParams     Json?               // Query string parameters
+
+  // Origem
+  ip              String?             // IP do cliente
+  userAgent       String?             // User-Agent header
+  apiKeyId        String?             // ID da API Key usada (se autenticado)
+  apiKeyPrefixo   String?             // Prefixo da API Key para identificacao rapida
+  origem          String?             // Origem da requisicao (AdvWell, Dashboard, etc)
+
+  // Conteudo da requisicao
+  requestBody     Json?               // Body da requisicao (sem dados sensiveis)
+  requestHeaders  Json?               // Headers relevantes
+
+  // Resposta
+  statusCode      Int                 // HTTP status code
+  responseBody    Json?               // Body da resposta (resumido)
+  responseTime    Int?                // Tempo de resposta em ms
+
+  // Status
+  sucesso         Boolean             @default(true)
+  erro            String?             // Mensagem de erro se houver
+
+  // Contexto
+  advogadoId      String?             // Se a requisicao era sobre um advogado
+  consultaId      String?             // Se criou uma consulta
+  companyId       String?             // CompanyId do AdvWell
+
+  createdAt       DateTime            @default(now())
+
+  @@index([metodo])
+  @@index([path])
+  @@index([apiKeyId])
+  @@index([sucesso])
+  @@index([createdAt])
+  @@index([companyId])
 }

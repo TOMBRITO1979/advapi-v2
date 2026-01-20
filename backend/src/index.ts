@@ -6,6 +6,7 @@ import dotenv from 'dotenv';
 
 import { router } from './routes/index.js';
 import { errorHandler } from './middlewares/error.js';
+import { requestLoggerMiddleware } from './middlewares/requestLogger.js';
 import { prisma } from './utils/prisma.js';
 
 dotenv.config();
@@ -26,6 +27,9 @@ app.use(express.urlencoded({ extended: true }));
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
+
+// Logger de requisicoes (deve vir antes das rotas)
+app.use(requestLoggerMiddleware);
 
 // Rotas da API
 app.use('/api', router);

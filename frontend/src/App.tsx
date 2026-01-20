@@ -12,6 +12,8 @@ import BancoDados from './pages/BancoDados';
 import Logs from './pages/Logs';
 import Workers from './pages/Workers';
 import ApiKeys from './pages/ApiKeys';
+import ApiRequests from './pages/ApiRequests';
+import Consultas from './pages/Consultas';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { token, loading } = useAuth();
@@ -51,6 +53,8 @@ export default function App() {
                 <Route path="/banco" element={<BancoDados />} />
                 <Route path="/logs" element={<Logs />} />
                 <Route path="/api-keys" element={<ApiKeys />} />
+                <Route path="/requests" element={<ApiRequests />} />
+                <Route path="/consultas" element={<Consultas />} />
               </Routes>
             </Layout>
           </ProtectedRoute>

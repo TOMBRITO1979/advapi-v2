@@ -15,6 +15,8 @@ import {
   Bell,
   Cpu,
   Key,
+  Globe,
+  Search,
 } from 'lucide-react';
 
 const menuItems = [
@@ -22,10 +24,12 @@ const menuItems = [
   { path: '/advogados', label: 'Advogados', icon: Users },
   { path: '/publicacoes', label: 'Publicacoes', icon: FileText },
   { path: '/banco', label: 'Banco de Dados', icon: Database },
+  { path: '/consultas', label: 'Raspagens', icon: Search },
   { path: '/proxies', label: 'Proxies', icon: Server },
   { path: '/fila', label: 'Fila', icon: Activity },
   { path: '/workers', label: 'Workers', icon: Cpu },
   { path: '/logs', label: 'Logs / Alertas', icon: Bell },
+  { path: '/requests', label: 'Requisicoes API', icon: Globe },
   { path: '/metricas', label: 'Metricas', icon: BarChart3 },
   { path: '/api-keys', label: 'API Keys', icon: Key },
 ];
