@@ -206,9 +206,12 @@ model Proxy {
   dataBloqueioCnj       DateTime?
   necessitaSubstituicao Boolean   @default(false)
 
+  // Integracao Webshare
+  webshareId      String?      // ID do proxy na Webshare (ex: d-17273342612)
+
   // Metadados
   nome            String?      // Nome amigavel
-  provedor        String?      // Webshare, BrightData, etc
+  provedor        String?      @default("webshare") // Webshare, BrightData, etc
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @updatedAt
 

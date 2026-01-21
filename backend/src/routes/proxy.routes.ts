@@ -4,6 +4,7 @@ import { authMiddleware, AuthRequest } from '../middlewares/auth.js';
 import { AppError } from '../middlewares/error.js';
 import * as XLSX from 'xlsx';
 import multer from 'multer';
+import { webshareService } from '../services/webshare.service.js';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -601,6 +602,144 @@ router.post('/resetar/todos', async (req: AuthRequest, res) => {
     message: `${resultado.count} proxies resetados`,
     resetados: resultado.count,
   });
+});
+
+// ============================================================================
+// WEBSHARE INTEGRATION
+// ============================================================================
+
+/**
+ * GET /api/proxies/webshare/status
+ * Verifica se a integração Webshare está configurada
+ */
+router.get('/webshare/status', async (req: AuthRequest, res) => {
+  const configurado = webshareService.isConfigured();
+
+  if (!configurado) {
+    res.json({
+      configurado: false,
+      mensagem: 'WEBSHARE_API_KEY não configurada',
+    });
+    return;
+  }
+
+  // Testa conexão com a API
+  try {
+    const lista = await webshareService.listarProxies(1, 1);
+    res.json({
+      configurado: true,
+      totalProxiesWebshare: lista.count,
+      mensagem: 'Integração Webshare ativa',
+    });
+  } catch (error: any) {
+    res.json({
+      configurado: true,
+      erro: error.message,
+      mensagem: 'Erro ao conectar com Webshare API',
+    });
+  }
+});
+
+/**
+ * POST /api/proxies/webshare/sincronizar
+ * Sincroniza proxies da Webshare com o banco local
+ */
+router.post('/webshare/sincronizar', async (req: AuthRequest, res) => {
+  if (!webshareService.isConfigured()) {
+    throw new AppError('WEBSHARE_API_KEY não configurada', 400);
+  }
+
+  try {
+    const resultado = await webshareService.sincronizarProxies();
+
+    res.json({
+      sucesso: true,
+      mensagem: 'Sincronização concluída',
+      ...resultado,
+    });
+  } catch (error: any) {
+    throw new AppError(`Erro na sincronização: ${error.message}`, 500);
+  }
+});
+
+/**
+ * POST /api/proxies/webshare/substituir/:id
+ * Substitui um proxy específico via Webshare
+ */
+router.post('/webshare/substituir/:id', async (req: AuthRequest, res) => {
+  if (!webshareService.isConfigured()) {
+    throw new AppError('WEBSHARE_API_KEY não configurada', 400);
+  }
+
+  const { id } = req.params;
+
+  try {
+    const resultado = await webshareService.substituirProxyComFalha(id);
+
+    if (resultado.sucesso) {
+      res.json(resultado);
+    } else {
+      throw new AppError(resultado.mensagem, 400);
+    }
+  } catch (error: any) {
+    throw new AppError(`Erro ao substituir proxy: ${error.message}`, 500);
+  }
+});
+
+/**
+ * POST /api/proxies/webshare/substituir-falhos
+ * Substitui todos os proxies com falhas via Webshare
+ */
+router.post('/webshare/substituir-falhos', async (req: AuthRequest, res) => {
+  if (!webshareService.isConfigured()) {
+    throw new AppError('WEBSHARE_API_KEY não configurada', 400);
+  }
+
+  try {
+    const resultado = await webshareService.substituirProxiesComFalha();
+
+    res.json({
+      sucesso: true,
+      mensagem: `${resultado.substituidos} de ${resultado.total} proxies substituídos`,
+      ...resultado,
+    });
+  } catch (error: any) {
+    throw new AppError(`Erro ao substituir proxies: ${error.message}`, 500);
+  }
+});
+
+/**
+ * GET /api/proxies/webshare/listar
+ * Lista proxies direto da Webshare (para debug/comparação)
+ */
+router.get('/webshare/listar', async (req: AuthRequest, res) => {
+  if (!webshareService.isConfigured()) {
+    throw new AppError('WEBSHARE_API_KEY não configurada', 400);
+  }
+
+  const page = Number(req.query.page) || 1;
+  const pageSize = Number(req.query.limit) || 25;
+
+  try {
+    const lista = await webshareService.listarProxies(page, pageSize);
+
+    res.json({
+      total: lista.count,
+      pagina: page,
+      proxies: lista.results.map(p => ({
+        id: p.id,
+        host: p.proxy_address,
+        porta: p.port,
+        usuario: p.username,
+        valido: p.valid,
+        pais: p.country_code,
+        cidade: p.city_name,
+        ultimaVerificacao: p.last_verification,
+      })),
+    });
+  } catch (error: any) {
+    throw new AppError(`Erro ao listar proxies: ${error.message}`, 500);
+  }
 });
 
 export default router;

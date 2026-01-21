@@ -1,6 +1,7 @@
 import { chromium, Browser, Page, Response } from 'playwright';
 import { prisma } from '../utils/prisma.js';
 import { normalizarNumeroProcesso } from '../utils/processo.js';
+import { webshareService } from './webshare.service.js';
 
 // URL correta do HComunica CNJ
 const HCOMUNICA_URL = 'https://hcomunica.cnj.jus.br';
@@ -152,16 +153,19 @@ export class ScraperService {
       // Detecta se e bloqueio do CNJ
       const { bloqueado, motivo } = this.detectarBloqueioCnjNoErro(erro || '');
 
+      const novasFalhasConsecutivas = proxyDb.falhasConsecutivas + 1;
+      const precisaSubstituir = bloqueado || novasFalhasConsecutivas >= 5;
+
       await prisma.proxy.update({
         where: { id: proxyDb.id },
         data: {
           consultasFalha: { increment: 1 },
           funcionando: false,
           ultimoErro: erro || 'Falha na conexao',
-          falhasConsecutivas: { increment: 1 },
+          falhasConsecutivas: novasFalhasConsecutivas,
           bloqueadoCnj: bloqueado,
           dataBloqueioCnj: bloqueado ? new Date() : proxyDb.dataBloqueioCnj,
-          necessitaSubstituicao: bloqueado || proxyDb.falhasConsecutivas + 1 >= 5,
+          necessitaSubstituicao: precisaSubstituir,
         },
       });
 
@@ -180,6 +184,24 @@ export class ScraperService {
           proxyId: proxyDb.id,
         },
       });
+
+      // Tenta substituir automaticamente via Webshare se necessario
+      if (precisaSubstituir && webshareService.isConfigured()) {
+        console.log(`[Scraper] Proxy ${proxy.host}:${proxy.porta} atingiu limite de falhas, tentando substituir via Webshare...`);
+
+        // Executa substituicao em background (nao bloqueia)
+        webshareService.substituirProxyComFalha(proxyDb.id)
+          .then(result => {
+            if (result.sucesso) {
+              console.log(`[Scraper] Proxy ${proxy.host}:${proxy.porta} substituido com sucesso via Webshare`);
+            } else {
+              console.log(`[Scraper] Falha ao substituir proxy via Webshare: ${result.mensagem}`);
+            }
+          })
+          .catch(err => {
+            console.error(`[Scraper] Erro ao substituir proxy via Webshare: ${err.message}`);
+          });
+      }
     }
   }
 
