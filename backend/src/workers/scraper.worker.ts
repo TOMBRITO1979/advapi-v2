@@ -704,6 +704,97 @@ setInterval(executarHealthCheckProxies, 60 * 60 * 1000);
 // Executa verificacao inicial apos 30 segundos
 setTimeout(executarHealthCheckProxies, 30000);
 
+// ============================================================================
+// LIMPEZA AUTOMATICA DE LOGS E API REQUESTS (1x ao dia - 3h da manha)
+// ============================================================================
+
+const CLEANUP_HORA = 3; // Horario de limpeza (3h da manha - Brasilia)
+const CLEANUP_DIAS_RETENCAO = 30; // Dias para manter logs/requests
+let ultimaLimpezaData: string | null = null; // Evita executar mais de 1x no mesmo dia
+
+/**
+ * Executa limpeza automatica de logs e API requests antigos
+ */
+async function executarLimpezaAutomatica(): Promise<void> {
+  const agora = new Date();
+  const horaBrasilia = new Date(agora.toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }));
+  const hora = horaBrasilia.getHours();
+  const dataHoje = horaBrasilia.toISOString().split('T')[0];
+
+  // Verifica se esta na hora certa e se ainda nao executou hoje
+  if (hora !== CLEANUP_HORA || ultimaLimpezaData === dataHoje) {
+    return;
+  }
+
+  console.log('\n[Cleanup] ========================================');
+  console.log(`[Cleanup] Iniciando limpeza automatica - ${horaBrasilia.toLocaleString('pt-BR')}`);
+
+  const dataLimite = new Date();
+  dataLimite.setDate(dataLimite.getDate() - CLEANUP_DIAS_RETENCAO);
+
+  try {
+    // 1. Limpa logs do sistema antigos (apenas resolvidos)
+    const logsRemovidos = await prisma.logSistema.deleteMany({
+      where: {
+        createdAt: { lt: dataLimite },
+        resolvido: true,
+      },
+    });
+    console.log(`[Cleanup] Logs do sistema removidos: ${logsRemovidos.count}`);
+
+    // 2. Limpa API request logs antigos
+    const requestsRemovidos = await prisma.apiRequestLog.deleteMany({
+      where: {
+        createdAt: { lt: dataLimite },
+      },
+    });
+    console.log(`[Cleanup] API requests removidos: ${requestsRemovidos.count}`);
+
+    // 3. Limpa execucao logs antigos
+    const execucoesRemovidas = await prisma.execucaoLog.deleteMany({
+      where: {
+        createdAt: { lt: dataLimite },
+      },
+    });
+    console.log(`[Cleanup] Execucao logs removidos: ${execucoesRemovidas.count}`);
+
+    // Registra log da limpeza
+    const totalRemovido = logsRemovidos.count + requestsRemovidos.count + execucoesRemovidas.count;
+    if (totalRemovido > 0) {
+      await prisma.logSistema.create({
+        data: {
+          tipo: 'INFO',
+          categoria: 'SISTEMA',
+          titulo: 'Limpeza automatica concluida',
+          mensagem: `Registros removidos (>${CLEANUP_DIAS_RETENCAO} dias):\n- Logs do sistema: ${logsRemovidos.count}\n- API requests: ${requestsRemovidos.count}\n- Execucao logs: ${execucoesRemovidas.count}\n\nTotal: ${totalRemovido}`,
+        },
+      });
+    }
+
+    ultimaLimpezaData = dataHoje;
+    console.log(`[Cleanup] Limpeza concluida - Total removido: ${totalRemovido}`);
+
+  } catch (error: any) {
+    console.error(`[Cleanup] Erro na limpeza automatica: ${error.message}`);
+    await prisma.logSistema.create({
+      data: {
+        tipo: 'ERRO',
+        categoria: 'SISTEMA',
+        titulo: 'Erro na limpeza automatica',
+        mensagem: error.message,
+      },
+    });
+  }
+
+  console.log(`[Cleanup] ========================================\n`);
+}
+
+// Executa verificacao de limpeza a cada hora (verifica se esta na hora configurada)
+setInterval(executarLimpezaAutomatica, 60 * 60 * 1000);
+
+// Executa verificacao inicial apos 1 minuto
+setTimeout(executarLimpezaAutomatica, 60000);
+
 // Graceful shutdown
 process.on('SIGTERM', async () => {
   console.log('\n[Worker] Finalizando...');
