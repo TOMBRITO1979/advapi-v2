@@ -3,9 +3,19 @@ import { prisma } from '../utils/prisma.js';
 interface PublicacaoCallback {
   numeroProcesso: string;
   siglaTribunal: string | null;
+  orgaoJulgador: string | null;
+  dataDisponibilizacao: Date | null;
   dataPublicacao: Date | null;
   tipoComunicacao: string | null;
   textoComunicacao: string | null;
+  textoLimpo: string | null;
+  linkIntegra: string | null;
+  parteAutor: string | null;
+  parteReu: string | null;
+  comarca: string | null;
+  classeProcessual: string | null;
+  advogadosProcesso: any;
+  nomeOrgao: string | null;
 }
 
 export class CallbackService {
@@ -41,9 +51,19 @@ export class CallbackService {
             publicacao: {
               numeroProcesso: publicacao.numeroProcesso,
               siglaTribunal: publicacao.siglaTribunal,
+              orgaoJulgador: publicacao.orgaoJulgador,
+              dataDisponibilizacao: publicacao.dataDisponibilizacao,
               dataPublicacao: publicacao.dataPublicacao,
               tipoComunicacao: publicacao.tipoComunicacao,
               textoComunicacao: publicacao.textoComunicacao,
+              textoLimpo: publicacao.textoLimpo,
+              linkIntegra: publicacao.linkIntegra,
+              parteAutor: publicacao.parteAutor,
+              parteReu: publicacao.parteReu,
+              comarca: publicacao.comarca,
+              classeProcessual: publicacao.classeProcessual,
+              advogadosProcesso: publicacao.advogadosProcesso,
+              nomeOrgao: publicacao.nomeOrgao,
             },
           }),
         });
@@ -163,9 +183,19 @@ export class CallbackService {
         pubs.map((p) => ({
           numeroProcesso: p.numeroProcesso,
           siglaTribunal: p.siglaTribunal,
+          orgaoJulgador: p.orgaoJulgador,
+          dataDisponibilizacao: p.dataDisponibilizacao,
           dataPublicacao: p.dataPublicacao,
           tipoComunicacao: p.tipoComunicacao,
           textoComunicacao: p.textoComunicacao,
+          textoLimpo: p.textoLimpo,
+          linkIntegra: p.linkIntegra,
+          parteAutor: p.parteAutor,
+          parteReu: p.parteReu,
+          comarca: p.comarca,
+          classeProcessual: p.classeProcessual,
+          advogadosProcesso: p.advogadosProcesso,
+          nomeOrgao: p.nomeOrgao,
         }))
       );
     }

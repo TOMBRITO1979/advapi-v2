@@ -167,14 +167,19 @@ const worker = new Worker<ConsultaJob>(
           publicacoesNovas.map((p) => ({
             numeroProcesso: p.numeroProcesso,
             siglaTribunal: p.siglaTribunal,
+            orgaoJulgador: p.orgaoJulgador,
+            dataDisponibilizacao: p.dataDisponibilizacao,
             dataPublicacao: p.dataPublicacao,
             tipoComunicacao: p.tipoComunicacao,
             textoComunicacao: p.textoComunicacao,
             textoLimpo: p.textoLimpo,
+            linkIntegra: p.linkIntegra,
             parteAutor: p.parteAutor,
             parteReu: p.parteReu,
             comarca: p.comarca,
             classeProcessual: p.classeProcessual,
+            advogadosProcesso: p.advogadosProcesso,
+            nomeOrgao: p.nomeOrgao,
           }))
         );
       }
