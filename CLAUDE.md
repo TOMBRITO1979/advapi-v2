@@ -1,133 +1,96 @@
 # ADVAPI v2 - Instruções Claude
 
 ## Visão Geral
-Sistema auxiliar para advwell.pro que faz raspagem de publicações jurídicas no CNJ (HComunica).
+Sistema de raspagem de publicações jurídicas no CNJ (HComunica) para advwell.pro.
 
 ## Arquitetura
 - **Backend**: Node.js/Express + TypeScript + Prisma + PostgreSQL
 - **Frontend**: React + Vite + Tailwind CSS
 - **Filas**: Redis + BullMQ
-- **Scraping**: Playwright
-- **Proxies**: Webshare (rotação automática)
-- **Deploy**: Docker Swarm com Traefik
-
-## Estrutura Principal
-```
-backend/
-  src/
-    routes/           # Endpoints da API
-    services/         # Lógica de negócio
-      scraper.service.ts   # Raspagem CNJ
-      webshare.service.ts  # Integração Webshare
-      callback.service.ts  # Callbacks AdvWell
-    workers/          # Workers BullMQ
-    middlewares/      # Auth, logging, API key
-  prisma/             # Schema do banco
-frontend/
-  src/
-    pages/            # Páginas React
-    services/api.ts   # Chamadas à API
-```
+- **Scraping**: Playwright (headless)
+- **Proxies**: Webshare (100 proxies, rotação automática)
+- **Deploy**: Docker Swarm + Traefik
 
 ## URLs Produção
 - Dashboard: https://app.advtom.com
 - API: https://api.advtom.com
 
-## Serviços Docker Swarm
-- `advapi_api` - API REST (1 réplica)
-- `advapi_worker` - Workers de scraping (3 réplicas)
-- `advapi_frontend` - Dashboard React/Nginx (1 réplica)
-- `advapi_postgres` - Banco PostgreSQL
-- `advapi_redis` - Filas BullMQ
+## Estrutura
+```
+backend/src/
+  routes/           # Endpoints REST
+  services/         # Lógica de negócio
+    scraper.service.ts   # Raspagem CNJ (200 páginas max)
+    webshare.service.ts  # Integração Webshare
+    callback.service.ts  # Callbacks AdvWell
+  workers/          # Workers BullMQ (3 réplicas)
+  middlewares/      # Auth, logging
+  prisma/           # Schema PostgreSQL
+frontend/src/
+  pages/            # Dashboard React
+  services/api.ts   # Chamadas API
+```
 
-## Comandos Deploy
+## Deploy
 ```bash
-# Build (sempre usar --no-cache)
+# Build (sempre --no-cache)
 cd /root/projects/advwell/advapi-v2/backend
 docker build --no-cache -t tomautomations/advapi:api-latest -f Dockerfile .
 docker build --no-cache -t tomautomations/advapi:worker-latest -f Dockerfile .
 cd /root/projects/advwell/advapi-v2/frontend
 docker build --no-cache -t tomautomations/advapi:frontend-latest -f Dockerfile .
 
-# Push
+# Push e Deploy
 docker push tomautomations/advapi:api-latest
 docker push tomautomations/advapi:worker-latest
 docker push tomautomations/advapi:frontend-latest
-
-# Deploy
 docker service update --image tomautomations/advapi:api-latest --force advapi_api
 docker service update --image tomautomations/advapi:worker-latest --force advapi_worker
 docker service update --image tomautomations/advapi:frontend-latest --force advapi_frontend
 
-# Sincronizar banco (após deploy)
-docker exec $(docker ps -q -f name=advapi_api) npx prisma db push
-
 # Logs
-docker service logs advapi_api -f --tail 50
-docker service logs advapi_worker -f --tail 50
+docker service logs advapi_worker -f --tail 100
 ```
 
-## Fluxo Principal
-1. AdvWell envia dados do advogado via POST /api/consulta
-2. Job criado na fila BullMQ com prioridade
-3. Worker executa raspagem no HComunica (5 anos, blocos de 1 ano)
-4. Publicações salvas no banco com deduplicação
-5. Callback enviado para AdvWell com resultados
+## Configuração Scraper (Otimizado)
+- Limite páginas: 200 (10.000 resultados)
+- Delay consultas: 8-15 segundos
+- Rate limit: 15/minuto
+- Horário: 5h-23h, 7 dias/semana
+- Retry: 2 tentativas por bloco/página
+- Blocos: 1 ano cada (5 anos = 5 blocos)
 
-## Integração Webshare (Proxies)
-- Sincronização automática de proxies
-- Substituição automática quando proxy falha 5+ vezes
-- Substituição imediata quando bloqueado pelo CNJ
-- Endpoints: `/api/proxies/webshare/*`
+## Fluxo
+1. AdvWell → POST /api/consulta (advogadoId, nome, datas)
+2. Job criado na fila BullMQ
+3. Worker raspa HComunica (blocos de 1 ano)
+4. Publicações salvas (deduplicação por processo)
+5. Callback para AdvWell com resultados
 
-## Políticas de Retenção (Automáticas)
-- **Publicações**: Máximo 3 andamentos por processo (aplicado após cada raspagem)
-- **Logs do Sistema**: Remove >30 dias (resolvidos) - executa 3h da manhã
-- **API Request Logs**: Remove >30 dias - executa 3h da manhã
-- **Execução Logs**: Remove >30 dias - executa 3h da manhã
-
-## Variáveis de Ambiente (no Swarm)
-- `DATABASE_URL` - Conexão PostgreSQL
-- `REDIS_URL` - Conexão Redis
-- `JWT_SECRET` - Secret para tokens
-- `ADVWELL_API_KEY` - Chave para callback AdvWell
-- `WEBSHARE_API_KEY` - Chave API Webshare
-- `NODE_ENV` - production
-
-## Principais Endpoints
-
-### Consultas
-- `POST /api/consulta` - Criar consulta (AdvWell)
-- `GET /api/consulta/:id/status` - Status da consulta
-- `GET /api/consulta/buffer` - Consulta direta no cache
-
-### Advogados
+## Endpoints Principais
+- `POST /api/consulta` - Nova consulta
 - `GET /api/advogados` - Listar advogados
-- `POST /api/advogados` - Criar advogado
-
-### Publicações
 - `GET /api/publicacoes` - Listar publicações
-
-### Proxies
 - `GET /api/proxies` - Listar proxies
-- `GET /api/proxies/alertas` - Proxies problemáticos
-- `POST /api/proxies/health-check` - Health check manual
-- `POST /api/proxies/webshare/sincronizar` - Sincronizar Webshare
-- `POST /api/proxies/webshare/substituir-falhos` - Substituir proxies com falha
-
-### Sistema
-- `GET /api/logs` - Logs do sistema
 - `GET /api/dashboard/metricas` - Métricas
 - `POST /api/auth/login` - Login dashboard
 
-## Banco de Dados (PostgreSQL)
-- `Advogado` - Cadastro com callbackUrl
-- `Publicacao` - Publicações do CNJ
-- `Proxy` - Proxies com integração Webshare
-- `Consulta` - Jobs de raspagem
-- `LogSistema` - Logs e alertas
-- `ApiKey` - Autenticação de parceiros
-- `ApiRequestLog` - Auditoria de requisições
-- `Usuario` - Usuários do dashboard
-- `Configuracao` - Configurações do sistema
-- `ExecucaoLog` - Log de execuções
+## Banco de Dados
+- `Advogado` - Cadastro + callbackUrl
+- `Publicacao` - Publicações CNJ (72 por advogado típico)
+- `Consulta` - Jobs com detalhes raspagem
+- `Proxy` - 100 proxies Webshare
+- `LogSistema` - Alertas e logs
+- `ApiKey` - Autenticação parceiros
+- `Usuario` - Usuários dashboard
+
+## Variáveis Ambiente (Swarm)
+- `DATABASE_URL` - PostgreSQL
+- `REDIS_URL` - Redis
+- `JWT_SECRET` - Tokens
+- `WEBSHARE_API_KEY` - Proxies
+
+## Limpeza Automática
+- Logs >30 dias: 3h da manhã
+- Health check proxies: 8h e 20h
+- Reset contadores proxy: a cada hora
