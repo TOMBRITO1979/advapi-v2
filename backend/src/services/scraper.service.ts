@@ -340,39 +340,54 @@ export class ScraperService {
       const bloco = blocos[i];
       console.log(`[Scraper] Bloco ${i + 1}/${blocos.length}: ${bloco.inicio} a ${bloco.fim}`);
 
-      try {
-        const resultado = await this.buscarPublicacoesComDetalhes(nomeAdvogado, bloco.inicio, bloco.fim, tribunal);
-        console.log(`[Scraper] Bloco ${i + 1}: ${resultado.processos.length} processos encontrados`);
-        todosProcessos.push(...resultado.processos);
+      // Tenta até 2 vezes por bloco
+      let tentativas = 0;
+      const maxTentativas = 2;
+      let sucesso = false;
 
-        // Acumula detalhes
-        detalhes.blocosProcessados++;
-        detalhes.paginasNavegadas += resultado.paginasNavegadas;
-        if (resultado.captchaDetectado) detalhes.captchaDetectado = true;
-        if (resultado.bloqueioDetectado) detalhes.bloqueioDetectado = true;
-        if (!detalhes.proxyUsado && resultado.proxyUsado) {
-          detalhes.proxyUsado = resultado.proxyUsado;
-        }
-        if (resultado.apiInterceptada) {
-          detalhes.detalhesExtras.apiInterceptada = true;
-        }
+      while (tentativas < maxTentativas && !sucesso) {
+        tentativas++;
+        try {
+          const resultado = await this.buscarPublicacoesComDetalhes(nomeAdvogado, bloco.inicio, bloco.fim, tribunal);
+          console.log(`[Scraper] Bloco ${i + 1}: ${resultado.processos.length} processos encontrados`);
+          todosProcessos.push(...resultado.processos);
 
-        // Delay entre blocos para nao sobrecarregar
-        if (i < blocos.length - 1) {
-          const delay = 5000 + Math.random() * 5000;
-          console.log(`[Scraper] Aguardando ${Math.round(delay / 1000)}s antes do proximo bloco...`);
-          await new Promise(r => setTimeout(r, delay));
-        }
-      } catch (error: any) {
-        console.error(`[Scraper] Erro no bloco ${i + 1}: ${error.message}`);
-        detalhes.detalhesExtras.errosPorBloco.push(`Bloco ${i + 1}: ${error.message}`);
+          // Acumula detalhes
+          detalhes.blocosProcessados++;
+          detalhes.paginasNavegadas += resultado.paginasNavegadas;
+          if (resultado.captchaDetectado) detalhes.captchaDetectado = true;
+          if (resultado.bloqueioDetectado) detalhes.bloqueioDetectado = true;
+          if (!detalhes.proxyUsado && resultado.proxyUsado) {
+            detalhes.proxyUsado = resultado.proxyUsado;
+          }
+          if (resultado.apiInterceptada) {
+            detalhes.detalhesExtras.apiInterceptada = true;
+          }
 
-        // Detecta bloqueio/captcha no erro
-        if (error.message?.includes('captcha')) detalhes.captchaDetectado = true;
-        if (error.message?.includes('blocked') || error.message?.includes('403')) {
-          detalhes.bloqueioDetectado = true;
+          sucesso = true;
+        } catch (error: any) {
+          console.error(`[Scraper] Erro no bloco ${i + 1} (tentativa ${tentativas}/${maxTentativas}): ${error.message}`);
+
+          if (tentativas >= maxTentativas) {
+            detalhes.detalhesExtras.errosPorBloco.push(`Bloco ${i + 1}: ${error.message} (apos ${maxTentativas} tentativas)`);
+          } else {
+            // Aguarda antes de retry
+            await new Promise(r => setTimeout(r, 10000));
+          }
+
+          // Detecta bloqueio/captcha no erro
+          if (error.message?.includes('captcha')) detalhes.captchaDetectado = true;
+          if (error.message?.includes('blocked') || error.message?.includes('403')) {
+            detalhes.bloqueioDetectado = true;
+          }
         }
-        // Continua com os proximos blocos mesmo se um falhar
+      }
+
+      // Delay entre blocos para nao sobrecarregar (reduzido de 5-10s para 3-6s)
+      if (i < blocos.length - 1) {
+        const delay = 3000 + Math.random() * 3000;
+        console.log(`[Scraper] Aguardando ${Math.round(delay / 1000)}s antes do proximo bloco...`);
+        await new Promise(r => setTimeout(r, delay));
       }
     }
 
@@ -501,7 +516,17 @@ export class ScraperService {
       if (proxy) console.log(`[Scraper] Usando proxy: ${proxy.host}:${proxy.porta}`);
 
       await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 90000 });
-      await page.waitForTimeout(15000);
+
+      // Espera inteligente: aguarda até que a API responda ou timeout de 20s
+      await Promise.race([
+        page.waitForResponse(
+          (response) => response.url().includes('hcomunicaapi.cnj.jus.br') && response.status() === 200,
+          { timeout: 20000 }
+        ).catch(() => {}),
+        page.waitForTimeout(20000)
+      ]);
+      // Pequeno delay adicional para garantir renderização
+      await page.waitForTimeout(2000);
 
       // Verifica se ha captcha na pagina
       const temCaptcha = await page.evaluate(`
@@ -534,7 +559,7 @@ export class ScraperService {
         if (totalPages && totalPages > 1) {
           const maisProcessos = await this.navegarPaginasApi(page, totalPages);
           resultado.processos.push(...maisProcessos);
-          resultado.paginasNavegadas = Math.min(totalPages, 50);
+          resultado.paginasNavegadas = Math.min(totalPages, 200);
         }
       }
 
@@ -685,8 +710,16 @@ export class ScraperService {
       // Acessa a pagina - usa 'domcontentloaded' ao inves de 'networkidle' pois SPAs nunca ficam idle
       await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 90000 });
 
-      // Aguarda a SPA carregar e fazer as chamadas XHR (aumentado para garantir captura)
-      await page.waitForTimeout(15000);
+      // Espera inteligente: aguarda até que a API responda ou timeout de 20s
+      await Promise.race([
+        page.waitForResponse(
+          (response) => response.url().includes('hcomunicaapi.cnj.jus.br') && response.status() === 200,
+          { timeout: 20000 }
+        ).catch(() => {}),
+        page.waitForTimeout(20000)
+      ]);
+      // Pequeno delay adicional para garantir renderização
+      await page.waitForTimeout(2000);
 
       // Se capturou respostas da API, extrai os processos
       let processos: ProcessoEncontrado[] = [];
@@ -822,7 +855,7 @@ export class ScraperService {
    */
   private async navegarPaginasApi(page: Page, totalPages: number): Promise<ProcessoEncontrado[]> {
     const todosProcessos: ProcessoEncontrado[] = [];
-    const maxPaginas = Math.min(totalPages, 50); // Limite de seguranca
+    const maxPaginas = Math.min(totalPages, 200); // Aumenta para 200 páginas (10.000 resultados)
 
     for (let pagina = 2; pagina <= maxPaginas; pagina++) {
       console.log(`[Scraper] Navegando para pagina ${pagina}/${totalPages}...`);
@@ -852,8 +885,16 @@ export class ScraperService {
 
       page.on('response', responseHandler);
 
-      // Tenta clicar no botao de proxima pagina
-      const clicou = await this.irParaProximaPagina(page);
+      // Tenta clicar no botao de proxima pagina (com retry)
+      let clicou = false;
+      for (let tentativa = 1; tentativa <= 2; tentativa++) {
+        clicou = await this.irParaProximaPagina(page);
+        if (clicou) break;
+        if (tentativa < 2) {
+          console.log(`[Scraper] Retry navegacao pagina ${pagina} (tentativa ${tentativa + 1})`);
+          await page.waitForTimeout(3000);
+        }
+      }
       if (!clicou) {
         console.log(`[Scraper] Nao conseguiu ir para pagina ${pagina}`);
         break;
@@ -901,7 +942,7 @@ export class ScraperService {
     const todosProcessos: ProcessoEncontrado[] = [];
     const processosVistos = new Set<string>();
     let paginaAtual = 1;
-    const maxPaginas = 100;
+    const maxPaginas = 200; // Aumenta de 100 para 200
 
     while (paginaAtual <= maxPaginas) {
       console.log(`[Scraper] Extraindo pagina ${paginaAtual} (HTML)...`);

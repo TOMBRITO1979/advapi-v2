@@ -208,8 +208,8 @@ const worker = new Worker<ConsultaJob>(
     connection: redisConnection,
     concurrency: 3, // Processa 3 jobs simultaneamente por worker
     limiter: {
-      max: 5,
-      duration: 60000, // Max 5 por minuto (conservador para CNJ)
+      max: 15,
+      duration: 60000, // Max 15 por minuto (1 a cada 4 segundos)
     },
   }
 );
@@ -226,19 +226,19 @@ worker.on('error', (error) => {
   console.error(`[Worker] Erro: ${error.message}`);
 });
 
-// Configuracao de horario de funcionamento
+// Configuracao de horario de funcionamento (expandido)
 const HORARIO_CONFIG = {
-  horaInicio: 6,       // 6h da manha
-  minutoInicio: 10,    // 10 minutos (inicia 6:10)
-  horaFim: 21,         // 21h (9pm)
-  minutoFim: 0,        // 0 minutos (termina 21:00)
-  diasSemana: [1, 2, 3, 4, 5, 6], // Segunda(1) a Sabado(6) - Domingo(0) nao roda
+  horaInicio: 5,       // 5h da manha (mais cedo)
+  minutoInicio: 0,     // 0 minutos (inicia 5:00)
+  horaFim: 23,         // 23h (mais tarde)
+  minutoFim: 0,        // 0 minutos (termina 23:00)
+  diasSemana: [0, 1, 2, 3, 4, 5, 6], // Inclui domingo - funciona todos os dias
   fusoHorario: 'America/Sao_Paulo',
 };
 
-// Delay variavel entre consultas (30s a 2min)
-const DELAY_MIN_MS = 30 * 1000;  // 30 segundos
-const DELAY_MAX_MS = 120 * 1000; // 2 minutos
+// Delay variavel entre consultas (8s a 15s - otimizado)
+const DELAY_MIN_MS = 8 * 1000;   // 8 segundos
+const DELAY_MAX_MS = 15 * 1000;  // 15 segundos
 
 /**
  * Verifica se esta dentro do horario de funcionamento
